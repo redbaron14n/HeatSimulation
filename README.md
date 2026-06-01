@@ -1,0 +1,1 @@
+This program will simulate heat conduction through a material given boundary and system conditions, ultimately finding the steady-state solution.
