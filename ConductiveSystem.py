@@ -12,7 +12,7 @@ class ConductiveSystem1D:
     Class for 1D heat conduction system. Given diffusivity, conductivity, emissivity, heat transfer coefficients, length, and temperatures, calculates how the temperature distribution across the system evolves over time.
     """
 
-    def __init__(self, diff: float, cond: float, emis: tuple[float], tran: tuple[float], length: float, temp: tuple[float], num_points: int, diff_num: float, max_runtime: float, convergence_tol: float = 1e-6):
+    def __init__(self, diff: float, cond: float, emis: tuple[float], tran: tuple[float], length: float, temp: tuple[float], num_points: int, max_runtime: float, diff_num: float = 0.5, convergence_tol: float = 1e-6):
 
         """
         @param diff (float): The thermal diffusivity of the material [m^2/s].
