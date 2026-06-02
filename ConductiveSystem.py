@@ -12,19 +12,31 @@ class ConductiveSystem1D:
     Class for 1D heat conduction system. Given diffusivity, conductivity, emissivity, heat transfer coefficients, length, and temperatures, calculates how the temperature distribution across the system evolves over time.
     """
 
-    def __init__(self, diff: float, cond: float, emis: tuple[float], tran: tuple[float], length: float, temp: tuple[float], num_points: int, max_runtime: float, diff_num: float = 0.5, convergence_tol: float = 1e-6):
+    def __init__(
+            self,
+            diff: float,
+            cond: float,
+            emis: tuple[float, float],
+            tran: tuple[float, float],
+            length: float,
+            temp: tuple[float, float, float, float],
+            num_points: int = 100,
+            max_runtime: float = 100.0,
+            diff_num: float = 0.5,
+            convergence_tol: float = 1e-6
+        ):
 
         """
-        @param diff (float): The thermal diffusivity of the material [m^2/s].
-        @param cond (float): The thermal conductivity of the material [W/m/K].
-        @param emis (tuple[float]): The emissivities of the material at the boundaries [dimensionless].
-        @param tran (tuple[float]): The heat transfer coefficients at the boundaries [W/m^2/K].
-        @param length (float): The length of the system [m].
-        @param temp (tuple[float]): The surrounding and initial boundary temperatures (surr1, bound1, bound2, surr2) [K].
-        @param num_points (int): The number of spatial points to discretize the system into for numerical calculations.
-        @param diff_num (float): The diffusion number of the system [dimensionless]. Relates to time step and numerical stability. Less than or equal to 0.5.
-        @param max_runtime (float): The maximum runtime for the simulation [s]. Used to determine how long to run the simulation before stopping if it hasn't converged yet.
-        @param convergence_tol (float): The tolerance for convergence of the simulation [dimensionless]. Used to determine when the simulation has converged.
+        :param float diff: The thermal diffusivity of the material [m^2/s].
+        :param float cond: The thermal conductivity of the material [W/m/K].
+        :param tuple[float, float] emis: The emissivities of the material at the boundaries [dimensionless].
+        :param tuple[float, float] tran: The heat transfer coefficients at the boundaries [W/m^2/K].
+        :param float length: The length of the system [m].
+        :param tuple[float, float, float, float] temp: The surrounding and initial boundary temperatures (surr1, bound1, bound2, surr2) [K].
+        :param int num_points: The number of spatial points to discretize the system into for numerical calculations.
+        :param float diff_num: The diffusion number of the system [dimensionless]. Relates to time step and numerical stability. Less than or equal to 0.5.
+        :param float max_runtime: The maximum runtime for the simulation [s]. Used to determine how long to run the simulation before stopping if it hasn't converged yet.
+        :param float convergence_tol: The tolerance for convergence of the simulation [dimensionless]. Used to determine when the simulation has converged.
         """
 
         self._set_diffusivity(diff)
@@ -55,7 +67,7 @@ class ConductiveSystem1D:
         self._conductivity = cond
 
 
-    def _set_emissivity(self, emis: tuple[float]):
+    def _set_emissivity(self, emis: tuple[float, float]):
 
         if len(emis) != 2:
             raise ValueError("Emissivity input must be a tuple of length 2.")
@@ -65,7 +77,7 @@ class ConductiveSystem1D:
         self._emissivities = emis
 
 
-    def _set_heat_transfer_coefs(self, tran: tuple[float]):
+    def _set_heat_transfer_coefs(self, tran: tuple[float, float]):
 
         if len(tran) != 2:
             raise ValueError("Heat transfer coefficient input must be a tuple of length 2.")
@@ -82,7 +94,7 @@ class ConductiveSystem1D:
         self._length = length
 
     
-    def _set_temps(self, temp: tuple[float]):
+    def _set_temps(self, temp: tuple[float, float, float, float]):
 
         if len(temp) != 4:
             raise ValueError("Temperature input must be a tuple of length 4.")
@@ -130,3 +142,5 @@ class ConductiveSystem1D:
     def _set_t_step(self):
 
         self._t_step = self._diffusion_number * (self._x_step ** 2) / self._diffusivity
+
+test = ConductiveSystem1D(1.0, 1.0, (0.5, 0.5), (10.0, 10.0), 1.0, (300.0, 300.0, 300.0, 300.0))
