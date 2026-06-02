@@ -1,0 +1,6 @@
+*
+
+!.gitignore
+!ConductiveSystem.py
+!FiniteDiffSolver.py
+!README.md
