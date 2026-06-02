@@ -80,7 +80,7 @@ class ConductiveSystem1D:
         :return: The emissivities at the boundaries [dimensionless].
         """
 
-        return self._emissivities
+        return self._emis
 
 
     @emissivities.setter
@@ -89,7 +89,7 @@ class ConductiveSystem1D:
         for e in emis:
             if e < 0 or e > 1:
                 raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
-        self._emissivities = emis
+        self._emis = emis
 
 
     @property
@@ -145,4 +145,4 @@ class ConductiveSystem1D:
         for t in temps:
             if t < 0:
                 raise ValueError("Each temperature must be non-negative.")
-        self._temperatures = temps
+        self._temps = temps
