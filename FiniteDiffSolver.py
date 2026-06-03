@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import float64, linspace, roots
+from numpy import abs, float64, linspace, roots
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -202,7 +202,11 @@ class FiniteDiffSolver1D:
         a1 = h * dz + k
         a0 = -k * T_inside - h * dz * T_gas - a4 * (T_ambient ** 4)
         coeffs = [a4, 0, 0, a1, a0] # Coefficients for the quartic equation a4*T^4 + a1*T + a0 = 0
-        T_bound: float = roots(coeffs).real[0]
+        roots_T = roots(coeffs)
+        #print(roots_T)
+        real_roots = roots_T[abs(roots_T.imag) < 1e-10].real
+        T_bound: float = real_roots.max()
+        #print(T_bound)
         return T_bound
 
 
@@ -221,8 +225,8 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
+        #while tick <= 100:
             tick += 1
-            print(f"Tick {tick}/{self._tick_count}, Time {tick * self._t_step:.2f}s, Sum Square Diff {((temps - self._init_temps()) ** 2).sum():.6e}")
             T_new = temps.copy()
             T_inside1, T_inside2 = temps[1], temps[-2]
             T_new[0] = self.solve_boundary_temp(k, epsilon1, h1, T_inside1, T_gas1)
@@ -230,15 +234,19 @@ class FiniteDiffSolver1D:
             for i in range(1, self._x_res - 1):
                 T_new[i] = temps[i] + self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
             sum_square = ((T_new - temps) ** 2).sum()
-            if sum_square < self._conv_tol ** 2:
+            if sum_square <= self._conv_tol:
                 converged = True
             temps = T_new
+            if tick % 1000 == 0:
+                print(f"Tick {tick}: [{temps[0]:.3f}, {temps[1]:.3f}, {temps[2]:.3f}, ..., {temps[-2]:.3f}, {temps[-1]:.3f}], Sum Square: {sum_square:.2e}")
         if converged:
             print(f"Simulation converged in {tick} ticks.")
+        else:
+            print(f"Simulation reached maximum time without convergence.")
         self._final_temps = temps
 
-test_system = ConductiveSystem1D(1.0, 1.0, (0.5, 0.5), (10.0, 10.0), 1.0, (300.0, 1800.0, 300.0, 300.0))
-test = FiniteDiffSolver1D(test_system, 298.15, 100, 100.0, 0.5, 1e-6)
+test_system = ConductiveSystem1D(1.58e-4, 40.0, (0.5, 0.5), (316.227766, 100.0), 0.0035, (2500.0, 350.0, 300.0, 300.0))
+test = FiniteDiffSolver1D(test_system, 300.0, 25, 100, 0.5, 1e-13)
 
 test.run_simulation()
 print(test._final_temps)
