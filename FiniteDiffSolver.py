@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import abs, float64, linspace, roots
+from numpy import abs, complexfloating, float64, floating, linspace, roots
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -16,7 +16,7 @@ class FiniteDiffSolver1D:
             self,
             system: ConductiveSystem1D,
             ambient_temp: float = 298.15,
-            spatial_res: int = 100,
+            spatial_res: int = 25,
             max_sim_time: float = 100.0,
             diff_num: float = 0.5,
             conv_tol: float = 1e-6
@@ -183,7 +183,25 @@ class FiniteDiffSolver1D:
         return linspace(0, self._system.length, self._x_res)
     
 
-    def solve_boundary_temp(self, k: float, epsilon: float, h: float, T_inside: float, T_gas: float) -> float:
+    def _root_selector(self, roots_T: NDArray[complexfloating] | NDArray[floating]) -> float:
+
+        """
+        Select the appropriate root from the quartic equation based on physical constraints (real and positive).
+
+        :param NDArray[complex] roots_T: The array of roots from the quartic equation.
+        :return: The selected root that represents the boundary temperature [K].
+        """
+
+        real_roots = roots_T[abs(roots_T.imag) < 1e-10].real
+        positive_real_roots = real_roots[real_roots > 0]
+        if len(positive_real_roots) == 0:
+            raise ValueError("No valid positive real roots found for boundary temperature.")
+        if len(positive_real_roots) > 1:
+            raise ValueError("Multiple positive real roots found for boundary temperature, unable to select unique solution.")
+        return positive_real_roots[0] # Should only be one valid root based on physical constraints
+
+
+    def _solve_boundary_temp(self, k: float, epsilon: float, h: float, T_inside: float, T_gas: float) -> float:
 
         """
         Solve for the boundary temperature based on the heat transfer coefficients and emissivity.
@@ -202,12 +220,53 @@ class FiniteDiffSolver1D:
         a1 = h * dz + k
         a0 = -k * T_inside - h * dz * T_gas - a4 * (T_ambient ** 4)
         coeffs = [a4, 0, 0, a1, a0] # Coefficients for the quartic equation a4*T^4 + a1*T + a0 = 0
-        roots_T = roots(coeffs)
-        #print(roots_T)
-        real_roots = roots_T[abs(roots_T.imag) < 1e-10].real
-        T_bound: float = real_roots.max()
-        #print(T_bound)
+        T_bound = self._root_selector(roots(coeffs))
         return T_bound
+
+
+    def _iterate_internal_temps(self, T_new: NDArray[float64], temps: NDArray[float64]) -> NDArray[float64]:
+
+        """
+        Perform one iteration of the finite difference solver to update the internal temperatures based on the diffusion equation.
+
+        :param NDArray[float64] temps: The current temperature array at all spatial points.
+        :return: A new temperature array with updated internal temperatures.
+        """
+
+        for i in range(1, self._x_res - 1):
+            T_new[i] = temps[i] + self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
+        return T_new        
+
+
+    def _check_convergence(self, T_new: NDArray[float64], T_old: NDArray[float64], tick: int) -> bool:
+
+        """
+        Check for convergence of the iterative solver based on the sum of squared differences between new and old temperature arrays.
+
+        :param NDArray[float64] T_new: The new temperature array after an iteration.
+        :param NDArray[float64] T_old: The old temperature array before the iteration.
+        :return: True if converged, False otherwise.
+        """
+
+        sum_square = ((T_new - T_old) ** 2).sum()
+        if tick % 1000 == 0:
+                print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
+        return sum_square <= self._conv_tol
+
+
+    def _simulation_summary(self, tick: int, converged: bool):
+
+        """
+        Print a summary of the simulation results after completion.
+
+        :param int tick: The number of ticks (iterations) taken to complete the simulation.
+        :param bool converged: Whether the simulation converged or reached maximum time without convergence.
+        """
+
+        if converged:
+            print(f"Simulation converged in {tick} ticks.")
+        else:
+            print(f"Simulation reached maximum time without convergence.")
 
 
     def run_simulation(self):
@@ -225,24 +284,15 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
-        #while tick <= 100:
             tick += 1
             T_new = temps.copy()
             T_inside1, T_inside2 = temps[1], temps[-2]
-            T_new[0] = self.solve_boundary_temp(k, epsilon1, h1, T_inside1, T_gas1)
-            T_new[-1] = self.solve_boundary_temp(k, epsilon2, h2, T_inside2, T_gas2)
-            for i in range(1, self._x_res - 1):
-                T_new[i] = temps[i] + self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
-            sum_square = ((T_new - temps) ** 2).sum()
-            if sum_square <= self._conv_tol:
-                converged = True
+            T_new[0] = self._solve_boundary_temp(k, epsilon1, h1, T_inside1, T_gas1)
+            T_new[-1] = self._solve_boundary_temp(k, epsilon2, h2, T_inside2, T_gas2)
+            T_new = self._iterate_internal_temps(T_new, temps)
+            converged = self._check_convergence(T_new, temps, tick)
             temps = T_new
-            if tick % 1000 == 0:
-                print(f"Tick {tick}: [{temps[0]:.3f}, {temps[1]:.3f}, {temps[2]:.3f}, ..., {temps[-2]:.3f}, {temps[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        if converged:
-            print(f"Simulation converged in {tick} ticks.")
-        else:
-            print(f"Simulation reached maximum time without convergence.")
+        self._simulation_summary(tick, converged)
         self._final_temps = temps
 
 test_system = ConductiveSystem1D(1.58e-4, 40.0, (0.5, 0.5), (316.227766, 100.0), 0.0035, (2500.0, 350.0, 300.0, 300.0))
