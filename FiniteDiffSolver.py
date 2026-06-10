@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import abs, array, complexfloating, float64, floating, full, linspace, roots
+from numpy import abs, array, complexfloating, float64, floating, full, linspace, roots, searchsorted
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -16,10 +16,11 @@ class FiniteDiffSolver1D:
             self,
             system: ConductiveSystem1D,
             initial_temps: NDArray[float64] | None = None,
-            torch_fluxs: NDArray[float64] = array([[[0.0, 0.0]], [[0.0, 0.0]]]),
+            torch_fluxs: NDArray[float64] = array([[0.0, 0.0, 0.0]]),
             gas_temps: tuple[float, float] = (298.15, 298.15),
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
+            min_sim_time: float = 0.0,
             max_sim_time: float = 100.0,
             diff_num: float = 0.5,
             conv_tol: float = 1e-6
@@ -28,25 +29,26 @@ class FiniteDiffSolver1D:
         """
         :param ConductiveSystem1D system: The conductive system to be solved.
         :param NDArray[float64] | None initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
-        :param NDArray[float64] | None torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. Default is None, which will initialize to no torch flux.
+        :param NDArray[float64] torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. The first column is time and the second and third columns are the new constant heat fluxes at the left and right boundaries introduced at that time. Default is no torch flux.
         :param tuple[float, float] gas_temps: The temperatures of the gas at the boundaries [K].
         :param float ambient_temp: The ambient temperature for the simulation [K].
         :param int spatial_res: The number of spatial points to use in the finite difference grid.
+        :param float min_sim_time: The minimum simulation time to run the solver for [s].
         :param float max_sim_time: The maximum simulation time to run the solver for [s].
         :param float diff_num: The diffusion number (alpha * dt / dx^2) to use for numerical stability.
         :param float conv_tol: The tolerance for convergence of the iterative solver.
         """
 
-        self._system = system
-        self._ambient_temp = ambient_temp
-        self._x_res = spatial_res
+        self.system = system
         self._set_initial_temps(initial_temps)
-        self._torch_fluxs = torch_fluxs
-        self._gas_temps = gas_temps
-        self._max_time = max_sim_time
-        self._diff_num = diff_num
-        self._conv_tol = conv_tol
-        self._update_x_step()
+        self.torch_heat_fluxes = torch_fluxs
+        self.gas_temperatures = gas_temps
+        self.ambient_temperature = ambient_temp
+        self.spatial_resolution = spatial_res
+        self.min_simulation_time = min_sim_time
+        self.max_simulation_time = max_sim_time
+        self.diffusion_number = diff_num
+        self.convergence_tol = conv_tol
 
 
     @property
@@ -57,6 +59,13 @@ class FiniteDiffSolver1D:
         """
 
         return self._system
+    
+
+    @system.setter
+    def system(self, system: ConductiveSystem1D):
+
+        self._system = system
+        self._update_x_step()
     
 
     @property
@@ -72,9 +81,20 @@ class FiniteDiffSolver1D:
     @torch_heat_fluxes.setter
     def torch_heat_fluxes(self, fluxs: NDArray[float64]):
 
-        if fluxs.shape != (2, -1, 2):
-            raise ValueError("Torch heat fluxes must be a 3D array with shape (2, N, 2).")
+        if fluxs.shape[1] != 3:
+            raise ValueError("Torch heat fluxes must be a 2D array with shape (N, 3).")
+        if not all(fluxs[:, 0] >= 0):
+            raise ValueError("Torch heat flux times must be non-negative.")
         self._torch_fluxs = fluxs
+        self._flux_time_points: NDArray[float64] = fluxs[:, 0]
+
+
+    def _get_current_torch_flux(self, time: float) -> tuple[float, float]:
+
+        idx = searchsorted(self._flux_time_points, time, side='right') - 1
+        if idx >= 0:
+            return self._torch_fluxs[idx, 1], self._torch_fluxs[idx, 2]
+        return 0.0, 0.0 # No torch flux before the first time point      
     
 
     @property
@@ -145,6 +165,24 @@ class FiniteDiffSolver1D:
 
 
     @property
+    def min_simulation_time(self) -> float:
+
+        """
+        :return: The minimum simulation time [s].
+        """
+
+        return self._min_time
+    
+
+    @min_simulation_time.setter
+    def min_simulation_time(self, min_time: float):
+
+        if min_time < 0.0:
+            raise ValueError("Minimum simulation time must be non-negative.")
+        self._min_time = min_time
+
+
+    @property
     def max_simulation_time(self) -> float:
 
         """
@@ -157,8 +195,10 @@ class FiniteDiffSolver1D:
     @max_simulation_time.setter
     def max_simulation_time(self, max_time: float):
 
-        if max_time <= 0:
+        if max_time <= 0.0:
             raise ValueError("Maximum simulation time must be greater than 0.")
+        elif max_time <= self._min_time:
+            raise ValueError("Maximum simulation time must be greater than minimum simulation time.")
         self._max_time = max_time
         self._update_t_step() # Update t_step based on new max_time
 
@@ -202,14 +242,18 @@ class FiniteDiffSolver1D:
 
     def _update_x_step(self):
 
+        if not hasattr(self, '_x_res'):
+            return # Allows initilization to complete before calculating x_step
         self._x_step = self._system.length / (self._x_res - 1)
         self._update_t_step() # Update t_step based on new x_step
 
 
     def _update_t_step(self):
 
+        if not hasattr(self, '_diff_num'):
+            return
         self._t_step = self._diff_num * (self._x_step ** 2) / self._system.diffusivity
-        self._update_tick_count() # Update tick count based on new t_step
+        self._update_tick_count()
 
 
     def _update_tick_count(self):
@@ -341,7 +385,5 @@ class FiniteDiffSolver1D:
         self._final_temps = temps
 
 test_system = ConductiveSystem1D(1.58e-4, 40.0, (0.5, 0.5), (316.227766, 100.0), 0.0035)
-test = FiniteDiffSolver1D(test_system, gas_temps=(2500.0, 300.0), ambient_temp=300.0, spatial_res=25, max_sim_time=100.0, diff_num=0.5, conv_tol=1e-6)
 
-test.run_simulation()
-print(test._final_temps)
+test = FiniteDiffSolver1D(test_system, gas_temps=(2500.0, 300.0), ambient_temp=300.0, spatial_res=25, max_sim_time=100.0, diff_num=0.5, conv_tol=1e-6)
