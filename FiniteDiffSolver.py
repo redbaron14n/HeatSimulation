@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import abs, complexfloating, float64, floating, linspace, roots
+from numpy import abs, complexfloating, float64, floating, full, linspace, roots
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -15,6 +15,8 @@ class FiniteDiffSolver1D:
     def __init__(
             self,
             system: ConductiveSystem1D,
+            initial_temps: NDArray[float64] | None = None,
+            gas_temps: tuple[float, float] = (298.15, 298.15),
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
             max_sim_time: float = 100.0,
@@ -24,6 +26,8 @@ class FiniteDiffSolver1D:
 
         """
         :param ConductiveSystem1D system: The conductive system to be solved.
+        :param NDArray[float64] | None initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
+        :param tuple[float, float] gas_temps: The temperatures of the gas at the boundaries [K].
         :param float ambient_temp: The ambient temperature for the simulation [K].
         :param int spatial_res: The number of spatial points to use in the finite difference grid.
         :param float max_sim_time: The maximum simulation time to run the solver for [s].
@@ -34,6 +38,8 @@ class FiniteDiffSolver1D:
         self._system = system
         self._ambient_temp = ambient_temp
         self._x_res = spatial_res
+        self._set_initial_temps(initial_temps)
+        self._gas_temps = gas_temps
         self._max_time = max_sim_time
         self._diff_num = diff_num
         self._conv_tol = conv_tol
@@ -48,6 +54,26 @@ class FiniteDiffSolver1D:
         """
 
         return self._system
+    
+
+    @property
+    def gas_temperatures(self) -> tuple[float, float]:
+
+        """
+        :return: The temperatures of the gas at the boundaries [K].
+        """
+
+        return self._gas_temps
+    
+
+    @gas_temperatures.setter
+    def gas_temperatures(self, temps: tuple[float, float]):
+
+        if len(temps) != 2:
+            raise ValueError("Gas temperatures must be a tuple of two values (T_gas1, T_gas2).")
+        if temps[0] < 0 or temps[1] < 0:
+            raise ValueError("Gas temperatures must be non-negative.")
+        self._gas_temps = temps
     
 
     @property
@@ -85,6 +111,16 @@ class FiniteDiffSolver1D:
             raise ValueError("Number of spatial points must be at least 2.")
         self._x_res = points
         self._update_x_step() # Update x_step based on new spatial resolution
+
+
+    def _set_initial_temps(self, initial_temps: NDArray[float64] | None):
+
+        if initial_temps is not None:
+            if len(initial_temps) != self._x_res:
+                raise ValueError("Length of initial temperatures array must match spatial resolution.")
+            self._init_temps = initial_temps
+        else:
+            self._init_temps: NDArray[float64] = full(self._x_res, self._ambient_temp) # Default to uniform ambient temperature
 
 
     @property
@@ -158,18 +194,6 @@ class FiniteDiffSolver1D:
     def _update_tick_count(self):
 
         self._tick_count = int(self._max_time / self._t_step) + 1
-
-
-    def _init_temps(self) -> NDArray[float64]:
-
-        """
-        Initialize the temperature array for the finite difference grid based on the system's initial temperatures.
-
-        :return: A 1D array of initial temperatures at each spatial point.
-        """
-
-        temps = self._system.temperatures
-        return linspace(temps[1], temps[2], self._x_res)
     
 
     def _init_x_grid(self) -> NDArray[float64]:
@@ -275,12 +299,12 @@ class FiniteDiffSolver1D:
         Run the finite difference simulation for the given system and solver parameters.
         """
 
-        temps = self._init_temps()
+        temps = self._init_temps
         x_grid = self._init_x_grid()
         k = self._system.conductivity
         epsilon1, epsilon2 = self._system.emissivities
         h1, h2 = self._system.heat_transfer_coefs
-        T_gas1, T_gas2 = self._system.temperatures[0], self._system.temperatures[3]
+        T_gas1, T_gas2 = self._gas_temps[0], self._gas_temps[1]
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
@@ -295,8 +319,8 @@ class FiniteDiffSolver1D:
         self._simulation_summary(tick, converged)
         self._final_temps = temps
 
-test_system = ConductiveSystem1D(1.58e-4, 40.0, (0.5, 0.5), (316.227766, 100.0), 0.0035, (2500.0, 350.0, 300.0, 300.0))
-test = FiniteDiffSolver1D(test_system, 300.0, 25, 100, 0.5, 1e-13)
+test_system = ConductiveSystem1D(1.58e-4, 40.0, (0.5, 0.5), (316.227766, 100.0), 0.0035)
+test = FiniteDiffSolver1D(test_system, gas_temps=(2500.0, 300.0), ambient_temp=300.0, spatial_res=25, max_sim_time=100.0, diff_num=0.5, conv_tol=1e-6)
 
 test.run_simulation()
 print(test._final_temps)

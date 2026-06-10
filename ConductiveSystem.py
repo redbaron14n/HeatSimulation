@@ -17,7 +17,6 @@ class ConductiveSystem1D:
             emis: tuple[float, float],
             htcs: tuple[float, float],
             length: float,
-            temps: tuple[float, float, float, float],
         ):
 
         """
@@ -26,7 +25,6 @@ class ConductiveSystem1D:
         :param tuple[float, float] emis: The emissivities of the material at the boundaries [dimensionless].
         :param tuple[float, float] htcs: The heat transfer coefficients at the boundaries [W/m^2/K].
         :param float length: The length of the system [m].
-        :param tuple[float, float, float, float] temps: The surrounding and initial boundary temperatures (surr1, bound1, bound2, surr2) [K].
         """
 
         self._diff = diff
@@ -34,7 +32,6 @@ class ConductiveSystem1D:
         self._emis = emis
         self._htcs = htcs
         self._length = length
-        self._temps = temps
 
 
     @property
@@ -127,22 +124,3 @@ class ConductiveSystem1D:
         if length <= 0:
             raise ValueError("Length must be positive.")
         self._length = length
-
-
-    @property
-    def temperatures(self) -> tuple[float, float, float, float]:
-
-        """
-        :return: The surrounding and initial boundary temperatures (surr1, bound1, bound2, surr2) [K].
-        """
-
-        return self._temps
-
-
-    @temperatures.setter
-    def temperatures(self, temps: tuple[float, float, float, float]):
-
-        for t in temps:
-            if t < 0:
-                raise ValueError("Each temperature must be non-negative.")
-        self._temps = temps
