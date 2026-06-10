@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import abs, complexfloating, float64, floating, full, linspace, roots
+from numpy import abs, array, complexfloating, float64, floating, full, linspace, roots
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -16,6 +16,7 @@ class FiniteDiffSolver1D:
             self,
             system: ConductiveSystem1D,
             initial_temps: NDArray[float64] | None = None,
+            torch_fluxs: NDArray[float64] = array([[[0.0, 0.0]], [[0.0, 0.0]]]),
             gas_temps: tuple[float, float] = (298.15, 298.15),
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
@@ -27,6 +28,7 @@ class FiniteDiffSolver1D:
         """
         :param ConductiveSystem1D system: The conductive system to be solved.
         :param NDArray[float64] | None initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
+        :param NDArray[float64] | None torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. Default is None, which will initialize to no torch flux.
         :param tuple[float, float] gas_temps: The temperatures of the gas at the boundaries [K].
         :param float ambient_temp: The ambient temperature for the simulation [K].
         :param int spatial_res: The number of spatial points to use in the finite difference grid.
@@ -39,6 +41,7 @@ class FiniteDiffSolver1D:
         self._ambient_temp = ambient_temp
         self._x_res = spatial_res
         self._set_initial_temps(initial_temps)
+        self._torch_fluxs = torch_fluxs
         self._gas_temps = gas_temps
         self._max_time = max_sim_time
         self._diff_num = diff_num
@@ -54,6 +57,24 @@ class FiniteDiffSolver1D:
         """
 
         return self._system
+    
+
+    @property
+    def torch_heat_fluxes(self) -> NDArray[float64]:
+
+        """
+        :return: The heat fluxes from the torch at the boundaries [W/m^2].
+        """
+
+        return self._torch_fluxs
+    
+
+    @torch_heat_fluxes.setter
+    def torch_heat_fluxes(self, fluxs: NDArray[float64]):
+
+        if fluxs.shape != (2, -1, 2):
+            raise ValueError("Torch heat fluxes must be a 3D array with shape (2, N, 2).")
+        self._torch_fluxs = fluxs
     
 
     @property
