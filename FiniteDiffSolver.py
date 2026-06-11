@@ -219,7 +219,7 @@ class FiniteDiffSolver1D:
         if diff_num <= 0 or diff_num > 0.5:
             raise ValueError("Diffusion number must be greater than 0 and less than or equal to 0.5 for numerical stability.")
         self._diff_num = diff_num
-        self._update_t_step() # Update t_step based on new diffusion number
+        self._update_tick_count() # Update tick count based on new diffusion number
 
 
     @property
@@ -258,6 +258,8 @@ class FiniteDiffSolver1D:
 
     def _update_tick_count(self):
 
+        if not hasattr(self, '_t_step'):
+            return
         self._tick_count = int(self._max_time / self._t_step) + 1
     
 
