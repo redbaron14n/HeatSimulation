@@ -23,7 +23,7 @@ class FiniteDiffSolver1D:
             spatial_res: int = 25,
             min_sim_time: float = 0.0,
             max_sim_time: float = 100.0,
-            diff_num: float = 0.5,
+            diff_num: float = 0.1,
             conv_tol: float = 1e-6
         ):
 
@@ -379,7 +379,10 @@ class FiniteDiffSolver1D:
 
         for i in range(1, self._x_res - 1):
             side = 0 if i <= self._cutoff_index else 1
-            T_new[i] = temps[i] + self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1]) - h[side] * bf * (temps[i] - self._gas_temps[side]) - eps[side] * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
+            cond_term = self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
+            conv_term = - h[side] * bf * (temps[i] - self._gas_temps[side])
+            rad_term = - eps[side] * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
+            T_new[i] = temps[i] + cond_term + conv_term + rad_term
         return T_new        
 
 
@@ -440,8 +443,6 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
-            if tick == 9000:
-                pass # debugging breakpoint
             tick += 1
             T_new = temps.copy()
             T_inside1, T_inside2 = temps[1], temps[-2]
@@ -457,7 +458,7 @@ class FiniteDiffSolver1D:
 
 test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
 
-test = FiniteDiffSolver1D(test_system, gas_temps=(2000.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=25, max_sim_time=10000.0, diff_num=0.5, conv_tol=1e-6)
+test = FiniteDiffSolver1D(test_system, gas_temps=(2000.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=25, max_sim_time=10000.0, diff_num=0.05, conv_tol=1e-6)
 
 test.run_simulation()
 print("Final temperatures:", test._final_temps)
