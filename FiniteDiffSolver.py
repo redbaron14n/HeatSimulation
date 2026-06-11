@@ -40,11 +40,11 @@ class FiniteDiffSolver1D:
         """
 
         self.system = system
-        self._set_initial_temps(initial_temps)
         self.torch_heat_fluxes = torch_fluxs
         self.gas_temperatures = gas_temps
         self.ambient_temperature = ambient_temp
         self.spatial_resolution = spatial_res
+        self.initial_temperatures = initial_temps
         self.min_simulation_time = min_sim_time
         self.max_simulation_time = max_sim_time
         self.diffusion_number = diff_num
@@ -154,14 +154,27 @@ class FiniteDiffSolver1D:
         self._update_x_step() # Update x_step based on new spatial resolution
 
 
-    def _set_initial_temps(self, initial_temps: NDArray[float64] | None):
+    @property
+    def initial_temperatures(self) -> NDArray[float64]:
 
-        if initial_temps is not None:
-            if len(initial_temps) != self._x_res:
-                raise ValueError("Length of initial temperatures array must match spatial resolution.")
-            self._init_temps = initial_temps
-        else:
+        """
+        :return: The initial temperatures for the finite difference grid [K].
+        """
+
+        return self._init_temps
+    
+
+    @initial_temperatures.setter
+    def initial_temperatures(self, initial_temps: NDArray[float64] | None):
+
+        if not hasattr(self, '_x_res'):
+            return # This will double-dip on initialization, but its the best way I can think of
+        if initial_temps is None:
             self._init_temps: NDArray[float64] = full(self._x_res, self._ambient_temp) # Default to uniform ambient temperature
+            return
+        if len(initial_temps) != self._x_res:
+            raise ValueError("Length of initial temperatures array must match spatial resolution.")
+        self._init_temps = initial_temps
 
 
     @property
