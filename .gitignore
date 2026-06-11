@@ -2,5 +2,6 @@
 
 !.gitignore
 !ConductiveSystem.py
+!DataHandling.py
 !FiniteDiffSolver.py
 !README.md

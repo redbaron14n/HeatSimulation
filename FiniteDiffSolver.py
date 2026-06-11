@@ -5,7 +5,7 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from DataHandling import save_procedure
+from DataHandling import load_init_temps, save_procedure
 from numpy import abs, array, column_stack, complexfloating, float64, floating, full, hstack, linspace, mean, roots, savetxt, searchsorted, sqrt, vstack
 from numpy.typing import NDArray
 
@@ -400,7 +400,8 @@ class FiniteDiffSolver1D:
         sum_square = ((T_new - T_old) ** 2).sum()
         if tick % 1000 == 0:
             print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        return sum_square <= self._conv_tol
+        finished = (sum_square <= self._conv_tol) and (tick * self._t_step >= self._min_time)
+        return finished
     
 
     def _calc_big_factor(self):
@@ -466,12 +467,20 @@ class FiniteDiffSolver1D:
         save_procedure(self._raw_temp_map, self._final_temps)
 
 
-test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
+# test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
+test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(100.0, 100.0), length=0.100)
 
-init_temps = full(100, 298.15) # Initial temperature gradient from 1 K to 1000 K across the system
-heat_fluxs = array([[0.0, 0.0, 0.0]]) # Torch heat fluxes at the boundaries over time (time in seconds, left flux, right flux)
+init_temps = load_init_temps("final_temps.csv")
+# init_temps = full(100, 298.15)
+# heat_fluxs = array([[0.0, 0.5e6, 0.0],
+#                     [1.0, 0.0, 0.0],
+#                     [2.0, 0.5e6, 0.0],
+#                     [3.0, 0.0, 0.0],
+#                     [4.0, 0.5e6, 0.0]])
+# heat_fluxs = array([[0.0, 0.5e6, 0.0]])
+heat_fluxs = array([[0.0, 0.0, 0.0]])
 
-test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=(2000.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-6)
+test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=(300.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
 
 test.run_simulation(True)
 print("Final temperatures:", test._final_temps)

@@ -41,3 +41,18 @@ def save_data(data: NDArray[np.float64], filename: str):
     print(f"Saving data to {filename}...")
     np.savetxt(filename, data, delimiter=',', fmt='%.6g', comments='')
     print("Data saved successfully.")
+
+
+def load_init_temps(filename: str) -> NDArray[np.float64]:
+
+    """
+    Load an initial temperature disitribution from a .csv file.
+
+    :param str filename: The name of the file to load the initial temperatures from.
+    :return: The initial temperature distribution.
+    """
+
+    print(f"Loading initial temperatures from {filename}...")
+    init_temps = np.loadtxt(filename, delimiter=',')
+    print("Initial temperatures loaded successfully.")
+    return init_temps
