@@ -167,14 +167,18 @@ class FiniteDiffSolver1D:
     @initial_temperatures.setter
     def initial_temperatures(self, initial_temps: NDArray[float64] | None):
 
-        if not hasattr(self, '_x_res'):
-            return # This will double-dip on initialization, but its the best way I can think of
         if initial_temps is None:
             self._init_temps: NDArray[float64] = full(self._x_res, self._ambient_temp) # Default to uniform ambient temperature
             return
         if len(initial_temps) != self._x_res:
             raise ValueError("Length of initial temperatures array must match spatial resolution.")
         self._init_temps = initial_temps
+
+
+    def _validate_init_temps(self): # Call this before running the simulation to catch if x_res was changed without updating initial temperatures
+
+        if len(self._init_temps) != self._x_res:
+            raise ValueError("Length of initial temperatures array must match spatial resolution.")
 
 
     @property
@@ -379,6 +383,7 @@ class FiniteDiffSolver1D:
         Run the finite difference simulation for the given system and solver parameters.
         """
 
+        self._validate_init_temps() # Ensure initial temperatures are valid before starting simulation
         temps = self._init_temps
         x_grid = self._init_x_grid()
         k = self._system.conductivity
