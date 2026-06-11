@@ -5,7 +5,8 @@
 # ###################
 
 from ConductiveSystem import ConductiveSystem1D
-from numpy import abs, array, column_stack, complexfloating, float64, floating, full, linspace, roots, savetxt, searchsorted
+from DataHandling import save_procedure
+from numpy import abs, array, column_stack, complexfloating, float64, floating, full, hstack, linspace, mean, roots, savetxt, searchsorted, sqrt, vstack
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
@@ -427,14 +428,19 @@ class FiniteDiffSolver1D:
             print(f"Simulation reached maximum time without convergence.")
 
 
-    def run_simulation(self):
+    def run_simulation(self, store: bool = False):
 
         """
+        :param int store_every: The interval at which to store the temperature data. Default is 0 (no data stored).
+
         Run the finite difference simulation for the given system and solver parameters.
         """
 
         self._validate_init_temps() # Ensure initial temperatures are valid before starting simulation
         temps = self._init_temps
+        if store:
+            last_saved = hstack((array([0.0]), temps))
+            self._raw_temp_list: list[NDArray[float64]] = [last_saved]
         k = self._system.conductivity
         emis = self._system.emissivities
         htcs = self._system.heat_transfer_coefs
@@ -451,41 +457,21 @@ class FiniteDiffSolver1D:
             T_new[-1] = self._solve_boundary_temp(k, emis[1], htcs[1], T_inside2, self._gas_temps[1], flux2)
             T_new = self._iterate_internal_temps(T_new, temps, emis, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick)
+            last_saved = hstack((array([time]), T_new))
+            self._raw_temp_list.append(last_saved)
             temps = T_new
+        self._raw_temp_map = array(self._raw_temp_list)
         self._simulation_summary(tick, converged)
         self._final_temps = temps
-        self._save_procedure()
+        save_procedure(self._raw_temp_map, self._final_temps)
 
-
-    def _save_procedure(self):
-
-        response = input("Do you want to save the final temperature distribution to a file? (y/n): ").lower()
-        if response == 'y':
-            filename = input("Enter the filename to save the temperatures (e.g., final_temps.csv): ")
-            self.save_final_temperatures(filename)
-
-
-    def save_final_temperatures(self, filename: str):
-
-        """
-        Save the final temperature distribution to a text file.
-
-        :param str filename: The name of the file to save the temperatures to.
-        """
-
-        if not hasattr(self, '_final_temps'):
-            raise ValueError("Simulation must be run before saving final temperatures.")
-        x_grid = self._init_x_grid()
-        data = column_stack((x_grid, self._final_temps))
-        savetxt(filename, data, delimiter=',', fmt='%.6f', header='Position (m),Temperature (K)', comments='')
-        
 
 test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
 
 init_temps = full(100, 298.15) # Initial temperature gradient from 1 K to 1000 K across the system
 heat_fluxs = array([[0.0, 0.0, 0.0]]) # Torch heat fluxes at the boundaries over time (time in seconds, left flux, right flux)
 
-test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=(2000.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
+test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=(2000.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-6)
 
-test.run_simulation()
+test.run_simulation(True)
 print("Final temperatures:", test._final_temps)
