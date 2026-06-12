@@ -5,6 +5,7 @@
 # ###################
 
 from numpy.typing import NDArray
+from pathlib import Path
 import numpy as np
 
 
@@ -56,3 +57,35 @@ def load_init_temps(filename: str) -> NDArray[np.float64]:
     init_temps = np.loadtxt(filename, delimiter=',')
     print("Initial temperatures loaded successfully.")
     return init_temps
+
+
+def load_points(filename: Path, points: list[int]) -> NDArray[np.float64]:
+
+    """
+    Loads the temperature over time data from specific positions from a .csv file.
+
+    :param Path filename: The path to the file to load the temperature data from.
+    :param list[int] points: The positions to load the temperature data from.
+    :return: The temperature data from the specified positions.
+    """
+
+    print(f"Loading temperature data from {filename} at positions {points}...")
+    data: NDArray[np.float64] = np.loadtxt(filename, delimiter=',')
+    columns = [0] + points
+    temperature_data = data[:, columns]
+    print("Temperature data loaded successfully.")
+    return temperature_data
+
+
+def find_minimums(temperature_data: NDArray[np.float64]) -> NDArray[np.float64]:
+
+    temps = temperature_data[:, 1:]
+    min_indices = np.argmin(temps, axis=0)
+    min_times = temperature_data[min_indices, 0]
+    min_times -= min_times[0]
+    min_temps = temps[min_indices, np.arange(temps.shape[1])]
+    minimums = np.vstack((min_times, min_temps))
+    return minimums
+
+test_data = load_points(Path("copper_chop.csv"), [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
+print(find_minimums(test_data))
