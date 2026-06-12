@@ -18,7 +18,7 @@ class FiniteDiffSolver1D:
             system: ConductiveSystem1D,
             initial_temps: NDArray[np.float64] | None = None,
             torch_fluxs: NDArray[np.float64] = np.array([[0.0, 0.0, 0.0]]),
-            gas_temps: tuple[float, float] = (298.15, 298.15),
+            gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
             env_cutoff: float = 0.0,
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
@@ -32,7 +32,7 @@ class FiniteDiffSolver1D:
         :param ConductiveSystem1D system: The conductive system to be solved.
         :param NDArray[np.float64] | None initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
         :param NDArray[np.float64] torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. The first column is time and the second and third columns are the new constant heat fluxes at the left and right boundaries introduced at that time. Default is no torch flux.
-        :param tuple[float, float] gas_temps: The temperatures of the gas at the boundaries [K].
+        :param NDArray[np.float64] gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures surrounding the left and right sections introduced at that time. Default is room temperature (298.15 K) on both sides.
         :param float env_cutoff: The cutoff distance (as a proportion of the system length) where left side gas temperatures, heat coefficients, and emissivities switch to right side values. Defaults to 0.0, meaning left side values are used for the left face only.
         :param float ambient_temp: The ambient temperature for the simulation [K].
         :param int spatial_res: The number of spatial points to use in the finite difference grid.
@@ -107,7 +107,7 @@ class FiniteDiffSolver1D:
     
 
     @property
-    def gas_temperatures(self) -> tuple[float, float]:
+    def gas_temperatures(self) -> NDArray[np.float64]:
 
         """
         :return: The temperatures of the gas at the boundaries [K].
@@ -117,13 +117,24 @@ class FiniteDiffSolver1D:
     
 
     @gas_temperatures.setter
-    def gas_temperatures(self, temps: tuple[float, float]):
+    def gas_temperatures(self, temps: NDArray[np.float64]):
 
-        if len(temps) != 2:
-            raise ValueError("Gas temperatures must be a tuple of two values (T_gas1, T_gas2).")
-        if temps[0] < 0 or temps[1] < 0:
-            raise ValueError("Gas temperatures must be non-negative.")
+        if temps.shape[1] != 3:
+            raise ValueError("Gas temperatures must be a 2D array with shape (N, 3).")
+        if not all(temps[:, 0] >= 0):
+            raise ValueError("Gas temperature times must be non-negative.")
+        if not (temps[:, 1:].all() > 0):
+            raise ValueError("Gas temperatures must be positive.")
         self._gas_temps = temps
+        self._gas_temp_time_points: NDArray[np.float64] = temps[:, 0]
+
+
+    def _get_current_gas_temps(self, time: float) -> tuple[float, float]:
+
+        idx = np.searchsorted(self._gas_temp_time_points, time, side='right') - 1
+        if idx >= 0:
+            return self._gas_temps[idx, 1], self._gas_temps[idx, 2]
+        return 298.15, 298.15 # Default gas temperature before the first time point
 
 
     @property
@@ -374,13 +385,14 @@ class FiniteDiffSolver1D:
         return T_bound
 
 
-    def _iterate_internal_temps(self, T_new: NDArray[np.float64], temps: NDArray[np.float64], eps: tuple[float, float], h: tuple[float, float], bf: float) -> NDArray[np.float64]:
+    def _iterate_internal_temps(self, T_new: NDArray[np.float64], temps: NDArray[np.float64], gas_temps: tuple[float, float], eps: tuple[float, float], h: tuple[float, float], bf: float) -> NDArray[np.float64]:
 
         """
         Perform one iteration of the finite difference solver to update the internal temperatures based on the diffusion equation.
 
         :param NDArray[float64] T_new: The array to store the new temperatures after the iteration.
         :param NDArray[float64] temps: The current temperature array at all spatial points.
+        :param tuple[float, float] gas_temps: The gas temperatures surrounding each side.
         :param tuple[float, float] eps: The emissivities at the boundaries.
         :param tuple[float, float] h: The heat transfer coefficients at the boundaries.
         :param float bf: (peri * dt) / (area * cphc * dens)
@@ -390,8 +402,9 @@ class FiniteDiffSolver1D:
 
         for i in range(1, self._x_res - 1):
             side = 0 if i <= self._cutoff_index else 1
+            gas_temp = gas_temps[side]
             cond_term = self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
-            conv_term = - h[side] * bf * (temps[i] - self._gas_temps[side])
+            conv_term = - h[side] * bf * (temps[i] - gas_temp)
             rad_term = - eps[side] * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
             T_new[i] = temps[i] + cond_term + conv_term + rad_term
         return T_new        
@@ -469,9 +482,10 @@ class FiniteDiffSolver1D:
             T_inside1, T_inside2 = temps[1], temps[-2]
             time = tick * self._t_step
             flux1, flux2 = self._get_current_torch_flux(time)
-            T_new[0] = self._solve_boundary_temp(k, emis[0], htcs[0], T_inside1, self._gas_temps[0], flux1)
-            T_new[-1] = self._solve_boundary_temp(k, emis[1], htcs[1], T_inside2, self._gas_temps[1], flux2)
-            T_new = self._iterate_internal_temps(T_new, temps, emis, htcs, big_factor)
+            gas_temps = self._get_current_gas_temps(time)
+            T_new[0] = self._solve_boundary_temp(k, emis[0], htcs[0], T_inside1, gas_temps[0], flux1)
+            T_new[-1] = self._solve_boundary_temp(k, emis[1], htcs[1], T_inside2, gas_temps[1], flux2)
+            T_new = self._iterate_internal_temps(T_new, temps, gas_temps, emis, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick)
             last_saved = np.hstack((np.array([time]), T_new))
             self._raw_temp_list.append(last_saved)
@@ -494,8 +508,9 @@ init_temps = load_init_temps("final_temps.csv")
 #                     [4.0, 0.5e6, 0.0]])
 # heat_fluxs = array([[0.0, 0.5e6, 0.0]])
 heat_fluxs = np.array([[0.0, 0.0, 0.0]])
+gas_temps = np.array([[0.0, 300.0, 300.0]])
 
-test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=(300.0, 300.0), env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
+test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-6)
 
 test.run_simulation(True)
 print("Final temperatures:", test._final_temps)
