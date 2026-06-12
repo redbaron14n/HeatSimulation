@@ -385,7 +385,7 @@ class FiniteDiffSolver1D:
         return T_bound
 
 
-    def _iterate_internal_temps(self, T_new: NDArray[np.float64], temps: NDArray[np.float64], gas_temps: tuple[float, float], eps: tuple[float, float], h: tuple[float, float], bf: float) -> NDArray[np.float64]:
+    def _iterate_internal_temps(self, T_new: NDArray[np.float64], temps: NDArray[np.float64], gas_temps: tuple[float, float], h: tuple[float, float], bf: float) -> NDArray[np.float64]:
 
         """
         Perform one iteration of the finite difference solver to update the internal temperatures based on the diffusion equation.
@@ -393,7 +393,6 @@ class FiniteDiffSolver1D:
         :param NDArray[float64] T_new: The array to store the new temperatures after the iteration.
         :param NDArray[float64] temps: The current temperature array at all spatial points.
         :param tuple[float, float] gas_temps: The gas temperatures surrounding each side.
-        :param tuple[float, float] eps: The emissivities at the boundaries.
         :param tuple[float, float] h: The heat transfer coefficients at the boundaries.
         :param float bf: (peri * dt) / (area * cphc * dens)
 
@@ -403,9 +402,10 @@ class FiniteDiffSolver1D:
         for i in range(1, self._x_res - 1):
             side = 0 if i <= self._cutoff_index else 1
             gas_temp = gas_temps[side]
+            emis = self._system.get_emissivity_at_temp(temps[i])
             cond_term = self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
             conv_term = - h[side] * bf * (temps[i] - gas_temp)
-            rad_term = - eps[side] * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
+            rad_term = - emis * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
             T_new[i] = temps[i] + cond_term + conv_term + rad_term
         return T_new        
 
@@ -470,25 +470,28 @@ class FiniteDiffSolver1D:
         if store:
             last_saved = np.hstack((np.array([0.0]), temps))
             self._raw_temp_list: list[NDArray[np.float64]] = [last_saved]
-        k = self._system.conductivity
-        emis = self._system.emissivities
-        htcs = self._system.heat_transfer_coefs
+        material = self._system
+        k = material.conductivity
+        htcs = material.heat_transfer_coefs
         big_factor = self._calc_big_factor()
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
             tick += 1
             T_new = temps.copy()
-            T_inside1, T_inside2 = temps[1], temps[-2]
+            T_inside0, T_inside1 = temps[1], temps[-2]
             time = tick * self._t_step
-            flux1, flux2 = self._get_current_torch_flux(time)
+            flux0, flux1 = self._get_current_torch_flux(time)
             gas_temps = self._get_current_gas_temps(time)
-            T_new[0] = self._solve_boundary_temp(k, emis[0], htcs[0], T_inside1, gas_temps[0], flux1)
-            T_new[-1] = self._solve_boundary_temp(k, emis[1], htcs[1], T_inside2, gas_temps[1], flux2)
-            T_new = self._iterate_internal_temps(T_new, temps, gas_temps, emis, htcs, big_factor)
+            emis0 = material.get_emissivity_at_temp(temps[0])
+            emis1 = material.get_emissivity_at_temp(temps[-1])
+            T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temps[0], flux0)
+            T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temps[1], flux1)
+            T_new = self._iterate_internal_temps(T_new, temps, gas_temps, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick)
-            last_saved = np.hstack((np.array([time]), T_new))
-            self._raw_temp_list.append(last_saved)
+            if store:
+                last_saved = np.hstack((np.array([time]), T_new))
+                self._raw_temp_list.append(last_saved)
             temps = T_new
         self._raw_temp_map = np.array(self._raw_temp_list)
         self._simulation_summary(tick, converged)
@@ -497,10 +500,12 @@ class FiniteDiffSolver1D:
 
 
 # test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
-test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(100.0, 100.0), length=0.100)
+emis = np.array([[298.15, 0.05]])
 
-init_temps = load_init_temps("final_temps.csv")
-# init_temps = full(100, 298.15)
+test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=emis, htcs=(100.0, 100.0), length=0.100)
+
+# init_temps = load_init_temps("final_temps.csv")
+init_temps = np.full(100, 298.15)
 # heat_fluxs = array([[0.0, 0.5e6, 0.0],
 #                     [1.0, 0.0, 0.0],
 #                     [2.0, 0.5e6, 0.0],
