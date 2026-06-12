@@ -10,6 +10,7 @@ from DataHandling import load_init_temps, save_procedure
 from numpy.typing import NDArray
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
+MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
 
 class FiniteDiffSolver1D:
 
@@ -416,18 +417,20 @@ class FiniteDiffSolver1D:
         return T_new
 
 
-    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], tick: int) -> bool:
+    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], tick: int, print_every: int) -> bool:
 
         """
         Check for convergence of the iterative solver based on the sum of squared differences between new and old temperature arrays.
 
         :param NDArray[float64] T_new: The new temperature array after an iteration.
         :param NDArray[float64] T_old: The old temperature array before the iteration.
+        :param int tick: The current iteration number.
+        :param int print_every: The interval at which to print the simulation progress. 0 means no printing.
         :return: True if converged, False otherwise.
         """
 
         sum_square = ((T_new - T_old) ** 2).sum()
-        if tick % 1000 == 0:
+        if print_every > 0 and tick % print_every == 0:
             print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
         finished = (sum_square <= self._conv_tol) and (tick * self._t_step >= self._min_time)
         return finished
@@ -458,15 +461,41 @@ class FiniteDiffSolver1D:
             print(f"Simulation reached maximum time without convergence.")
 
 
+    def _build_lookup_tables(self, times) -> tuple[tuple[NDArray[np.float64], NDArray[np.float64]], tuple[NDArray[np.float64], NDArray[np.float64]], NDArray[np.float64]]:
+
+        """
+        Build lookup tables for the simulation data. Drastically reduces the computational cost of interpolation during the simulation.
+
+        :param NDArray[float64] times: The time points for which to build the lookup tables.
+        :return: A tuple of the lookup tables for flux, gas temperature, and emissivity.
+        """
+
+        flux_data = self._torch_fluxs
+        gas_data = self._gas_temps
+        emis_data = self._system.emissivities
+
+        flux0_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 1], left=0.0)
+        flux1_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 2], left=0.0)
+        gas_temp0_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 1], left=298.15)
+        gas_temp1_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 2], left=298.15)
+        emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1), emis_data[:, 0], emis_data[:, 1])
+
+        fluxs = (flux0_lookup, flux1_lookup)
+        gasses = (gas_temp0_lookup, gas_temp1_lookup)
+
+        return fluxs, gasses, emis_lookup
+
+
     ########################################
     # Public Methods
     ########################################
 
 
-    def run_simulation(self, store: bool = True):
+    def run_simulation(self, store: bool = True, print_every: int = 1000):
 
         """
-        :param int store_every: The interval at which to store the temperature data. Default is 0 (no data stored).
+        :param bool store: Whether to store the simulation data. Default is True.
+        :param int print_every: The interval at which to print the simulation progress. Default is 1000. 0 means no printing.
 
         Run the finite difference simulation for the given system and solver parameters.
         """
@@ -479,34 +508,24 @@ class FiniteDiffSolver1D:
         material = self._system
         k = material.conductivity
         htcs = material.heat_transfer_coefs
-        emis_data = material.emissivities
         times = np.arange(0, self._max_time + self._t_step, self._t_step)
-        flux_data = self._torch_fluxs
-        gas_data = self._gas_temps
-        flux0_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 1], left=0.0) # Much faster to preload this than interpolating at each time step
-        flux1_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 2], left=0.0)
-        gas_temp0_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 1], left=298.15)
-        gas_temp1_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 2], left=298.15)
-        emis_lookup = np.interp(np.arange(0, 6001), emis_data[:, 0], emis_data[:, 1])
+        fluxs, gasses, emis_lookup = self._build_lookup_tables(times)
         big_factor = self._calc_big_factor()
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
             tick += 1
             T_new = temps.copy()
-            T_inside0, T_inside1 = temps[1], temps[-2]
-            time = tick * self._t_step
-            flux0 = flux0_lookup[tick]
-            flux1 = flux1_lookup[tick]
-            gas_temp0 = gas_temp0_lookup[tick]
-            gas_temp1 = gas_temp1_lookup[tick]
-            # emis = np.interp(temps, emis_data[:, 0], emis_data[:, 1]) # Can't really preload this as temperatures aren't discretized
+            T_inside0, T_inside1 = temps[1], temps[-2] # Finds the previous temperatures just inside the boundaries
+            time = times[tick]
+            flux0, flux1 = fluxs[0][tick], fluxs[1][tick]
+            gas_temp0, gas_temp1 = gasses[0][tick], gasses[1][tick]
             emis = emis_lookup[temps.astype(int)]
             emis0, emis1 = emis[0], emis[-1]
             T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temp0, flux0)
             T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
             T_new = self._iterate_internal_temps(T_new, temps, (gas_temp0, gas_temp1), emis, htcs, big_factor)
-            converged = self._check_convergence(T_new, temps, tick)
+            converged = self._check_convergence(T_new, temps, tick, print_every)
             if store:
                 last_saved = np.hstack((np.array([time]), T_new))
                 self._raw_temp_list.append(last_saved)
@@ -523,18 +542,18 @@ emis = np.array([[298.15, 0.21], [383.15, 0.33]])
 
 test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=400.0, emis=emis, htcs=(50.0, 50.0), length=0.100)
 
-# init_temps = load_init_temps("final_temps.csv")
-init_temps = np.full(100, 298.15)
+init_temps = load_init_temps("copper_steadystate.csv")
+# init_temps = np.full(100, 298.15)
 # heat_fluxs = array([[0.0, 0.5e6, 0.0],
 #                     [1.0, 0.0, 0.0],
 #                     [2.0, 0.5e6, 0.0],
 #                     [3.0, 0.0, 0.0],
 #                     [4.0, 0.5e6, 0.0]])
 # heat_fluxs = array([[0.0, 0.5e6, 0.0]])
-heat_fluxs = np.array([[0.0, 0.5e6, 0.0]])
-gas_temps = np.array([[0.0, 2000.0, 298.15]])
+heat_fluxs = np.array([[0.0, 0.5e6, 0.0], [0.9, 0.5e6, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.1, 0.5e6, 0.0]])
+gas_temps = np.array([[0.0, 2000.0, 298.15], [0.9, 2000.0, 298.15], [1.0, 298.15, 298.15], [2.0, 298.15, 298.15], [2.1, 2000.0, 298.15]])
 
 test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
 
-test.run_simulation(True)
+test.run_simulation(True, 10000)
 print("Final temperatures:", test._final_temps)
