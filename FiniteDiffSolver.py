@@ -92,18 +92,9 @@ class FiniteDiffSolver1D:
 
         if fluxs.shape[1] != 3:
             raise ValueError("Torch heat fluxes must be a 2D array with shape (N, 3).")
-        if not all(fluxs[:, 0] >= 0):
+        if not np.all(fluxs[:, 0] >= 0):
             raise ValueError("Torch heat flux times must be non-negative.")
-        self._torch_fluxs = fluxs
-        self._flux_time_points: NDArray[np.float64] = fluxs[:, 0]
-
-
-    def _get_current_torch_flux(self, time: float) -> tuple[float, float]:
-
-        idx = np.searchsorted(self._flux_time_points, time, side='right') - 1
-        if idx >= 0:
-            return self._torch_fluxs[idx, 1], self._torch_fluxs[idx, 2]
-        return 0.0, 0.0 # No torch flux before the first time point      
+        self._torch_fluxs = fluxs   
     
 
     @property
@@ -121,20 +112,11 @@ class FiniteDiffSolver1D:
 
         if temps.shape[1] != 3:
             raise ValueError("Gas temperatures must be a 2D array with shape (N, 3).")
-        if not all(temps[:, 0] >= 0):
+        if not np.all(temps[:, 0] >= 0):
             raise ValueError("Gas temperature times must be non-negative.")
-        if not (temps[:, 1:].all() > 0):
+        if not np.all(temps[:, 1:] > 0):
             raise ValueError("Gas temperatures must be positive.")
         self._gas_temps = temps
-        self._gas_temp_time_points: NDArray[np.float64] = temps[:, 0]
-
-
-    def _get_current_gas_temps(self, time: float) -> tuple[float, float]:
-
-        idx = np.searchsorted(self._gas_temp_time_points, time, side='right') - 1
-        if idx >= 0:
-            return self._gas_temps[idx, 1], self._gas_temps[idx, 2]
-        return 298.15, 298.15 # Default gas temperature before the first time point
 
 
     @property
@@ -385,7 +367,15 @@ class FiniteDiffSolver1D:
         return T_bound
 
 
-    def _iterate_internal_temps(self, T_new: NDArray[np.float64], temps: NDArray[np.float64], gas_temps: tuple[float, float], h: tuple[float, float], bf: float) -> NDArray[np.float64]:
+    def _iterate_internal_temps(
+            self,
+            T_new: NDArray[np.float64],
+            temps: NDArray[np.float64],
+            gas_temps: tuple[float, float],
+            emis_data: NDArray[np.float64],
+            h: tuple[float, float],
+            bf: float
+        ) -> NDArray[np.float64]:
 
         """
         Perform one iteration of the finite difference solver to update the internal temperatures based on the diffusion equation.
@@ -394,6 +384,7 @@ class FiniteDiffSolver1D:
         :param NDArray[float64] temps: The current temperature array at all spatial points.
         :param tuple[float, float] gas_temps: The gas temperatures surrounding each side.
         :param tuple[float, float] h: The heat transfer coefficients at the boundaries.
+        :param NDArray[float64] emis: The emissivity values at each spatial point.
         :param float bf: (peri * dt) / (area * cphc * dens)
 
         :return: A new temperature array with updated internal temperatures.
@@ -402,7 +393,7 @@ class FiniteDiffSolver1D:
         for i in range(1, self._x_res - 1):
             side = 0 if i <= self._cutoff_index else 1
             gas_temp = gas_temps[side]
-            emis = self._system.get_emissivity_at_temp(temps[i])
+            emis = emis_data[i]
             cond_term = self._diff_num * (temps[i+1] - 2*temps[i] + temps[i-1])
             conv_term = - h[side] * bf * (temps[i] - gas_temp)
             rad_term = - emis * BOLTZ * bf * (temps[i]**4 - self._ambient_temp**4)
@@ -473,6 +464,9 @@ class FiniteDiffSolver1D:
         material = self._system
         k = material.conductivity
         htcs = material.heat_transfer_coefs
+        emis_data = material.emissivities
+        flux_data = self._torch_fluxs
+        gas_data = self._gas_temps
         big_factor = self._calc_big_factor()
         converged = False
         tick = 0
@@ -481,13 +475,15 @@ class FiniteDiffSolver1D:
             T_new = temps.copy()
             T_inside0, T_inside1 = temps[1], temps[-2]
             time = tick * self._t_step
-            flux0, flux1 = self._get_current_torch_flux(time)
-            gas_temps = self._get_current_gas_temps(time)
-            emis0 = material.get_emissivity_at_temp(temps[0])
-            emis1 = material.get_emissivity_at_temp(temps[-1])
-            T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temps[0], flux0)
-            T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temps[1], flux1)
-            T_new = self._iterate_internal_temps(T_new, temps, gas_temps, htcs, big_factor)
+            flux0 = np.interp(time, flux_data[:, 0], flux_data[:, 1], left=0.0)
+            flux1 = np.interp(time, flux_data[:, 0], flux_data[:, 2], left=0.0)
+            gas_temp0 = np.interp(time, gas_data[:, 0], gas_data[:, 1], left=298.15)
+            gas_temp1 = np.interp(time, gas_data[:, 0], gas_data[:, 2], left=298.15)
+            emis = np.interp(temps, emis_data[:, 0], emis_data[:, 1])
+            emis0, emis1 = emis[0], emis[-1]
+            T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temp0, flux0)
+            T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
+            T_new = self._iterate_internal_temps(T_new, temps, (gas_temp0, gas_temp1), emis, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick)
             if store:
                 last_saved = np.hstack((np.array([time]), T_new))
@@ -512,8 +508,8 @@ init_temps = np.full(100, 298.15)
 #                     [3.0, 0.0, 0.0],
 #                     [4.0, 0.5e6, 0.0]])
 # heat_fluxs = array([[0.0, 0.5e6, 0.0]])
-heat_fluxs = np.array([[0.0, 0.0, 0.0]])
-gas_temps = np.array([[0.0, 300.0, 300.0]])
+heat_fluxs = np.array([[0.0, 0.0, 0.0], [4.9, 0.0, 0.0], [5.0, 0.5e6, 0.0]])
+gas_temps = np.array([[0.0, 298.15, 298.15], [4.9, 298.15, 298.15], [5.0, 2000.0, 298.15]])
 
 test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-6)
 
