@@ -18,14 +18,38 @@ def save_procedure(raw_temp_map, final_temps):
     :param NDArray[np.float64] final_temps: The final temperature distribution.
     """
 
-    response = input("Do you want to save the simulation data to a file? (y/n): ").lower()
-    if response == "y":
-        filename = input("Enter the filename to save the simulation data (e.g., simulation_data.csv): ")
-        save_data(raw_temp_map, filename)
-    response = input("Do you want to save the final temperature distribution to a file? (y/n): ").lower()
-    if response == 'y':
-        filename = input("Enter the filename to save the temperatures (e.g., final_temps.csv): ")
-        save_data(final_temps, filename)
+    ask_save_data(raw_temp_map)
+    ask_save_final_temps(final_temps)
+
+
+def ask_save_data(raw_temp_map):
+
+    invalid = True
+    while invalid:
+        response = input("Do you want to save the simulation data to a file? (y/n): ").lower()
+        if response == "y":
+            filename = input("Enter the filename to save the simulation data (e.g., simulation_data.csv): ")
+            save_data(raw_temp_map, filename)
+            invalid = False
+        elif response == "n":
+            invalid = False
+        else:
+            print("Invalid input. Please enter 'y' or 'n'.")
+
+
+def ask_save_final_temps(final_temps):
+
+    invalid = True
+    while invalid:
+        response = input("Do you want to save the final temperature distribution to a file? (y/n): ").lower()
+        if response == 'y':
+            filename = input("Enter the filename to save the temperatures (e.g., final_temps.csv): ")
+            save_data(final_temps, filename)
+            invalid = False
+        elif response == 'n':
+            invalid = False
+        else:
+            print("Invalid input. Please enter 'y' or 'n'.")
 
 
 def save_data(data: NDArray[np.float64], filename: str):
@@ -37,10 +61,11 @@ def save_data(data: NDArray[np.float64], filename: str):
     :param str filename: The name of the file to save the data to.
     """
 
+    path = Path(f"Data/{filename}")
     if not data.any():
         raise ValueError("No data to save.")
-    print(f"Saving data to {filename}...")
-    np.savetxt(filename, data, delimiter=',', fmt='%.6g', comments='')
+    print(f"Saving data to {path}...")
+    np.savetxt(path, data, delimiter=',', fmt='%.6g', comments='')
     print("Data saved successfully.")
 
 
@@ -53,8 +78,9 @@ def load_init_temps(filename: str) -> NDArray[np.float64]:
     :return: The initial temperature distribution.
     """
 
-    print(f"Loading initial temperatures from {filename}...")
-    init_temps = np.loadtxt(filename, delimiter=',')
+    path = Path(f"Data/{filename}")
+    print(f"Loading initial temperatures from {path}...")
+    init_temps = np.loadtxt(path, delimiter=',')
     print("Initial temperatures loaded successfully.")
     return init_temps
 
@@ -69,8 +95,9 @@ def load_points(filename: Path, points: list[int]) -> NDArray[np.float64]:
     :return: The temperature data from the specified positions.
     """
 
-    print(f"Loading temperature data from {filename} at positions {points}...")
-    data: NDArray[np.float64] = np.loadtxt(filename, delimiter=',')
+    path = Path(f"Data/{filename}")
+    print(f"Loading temperature data from {path} at positions {points}...")
+    data: NDArray[np.float64] = np.loadtxt(path, delimiter=',')
     columns = [0] + points
     temperature_data = data[:, columns]
     print("Temperature data loaded successfully.")
@@ -87,5 +114,5 @@ def find_minimums(temperature_data: NDArray[np.float64]) -> NDArray[np.float64]:
     minimums = np.vstack((min_times, min_temps))
     return minimums
 
-test_data = load_points(Path("copper_chop.csv"), [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
-print(find_minimums(test_data))
+# test_data = load_points(Path("copper_chop.csv"), [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
+# print(find_minimums(test_data))
