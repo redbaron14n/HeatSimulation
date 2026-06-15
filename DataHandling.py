@@ -104,15 +104,29 @@ def load_points(filename: Path, points: list[int]) -> NDArray[np.float64]:
     return temperature_data
 
 
-def find_minimums(temperature_data: NDArray[np.float64]) -> NDArray[np.float64]:
+def load_temp_data(csv_path: Path):
+
+    path = Path(f"Data/{csv_path}")
+    print(f"Loading temperature data from {path}...")
+    data = np.loadtxt(path, delimiter=',')
+    times = data[:, 0]
+    temps = data[:, 1:]
+    print(f"Successfully loaded data.")
+    return times, temps
+
+
+def save_minimums(temperature_data: NDArray[np.float64], length: float, filename: str):
 
     temps = temperature_data[:, 1:]
     min_indices = np.argmin(temps, axis=0)
+    positions = np.linspace(0.0, length, temps.shape[1])
     min_times = temperature_data[min_indices, 0]
-    min_times -= min_times[0]
+    offset = np.min(min_times)
+    offset_times = min_times - offset
     min_temps = temps[min_indices, np.arange(temps.shape[1])]
-    minimums = np.vstack((min_times, min_temps))
-    return minimums
+    minimums = np.column_stack((positions, min_times, offset_times, min_temps))
+    save_data(minimums, filename)
 
 # test_data = load_points(Path("copper_chop.csv"), [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
 # print(find_minimums(test_data))
+# save_minimums(np.loadtxt("data/copper_chop.csv", delimiter=','), 0.1, "copper_minimums.csv")
