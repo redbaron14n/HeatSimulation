@@ -523,7 +523,8 @@ class FiniteDiffSolver1D:
             emis = emis_lookup[temps.astype(int)]
             emis0, emis1 = emis[0], emis[-1]
             T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temp0, flux0)
-            T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
+            # T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
+            T_new[-1] = 298.15
             T_new = self._iterate_internal_temps(T_new, temps, (gas_temp0, gas_temp1), emis, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick, print_every)
             if store:
@@ -538,22 +539,22 @@ class FiniteDiffSolver1D:
 
 
 # test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
-emis = np.array([[298.15, 0.21], [383.15, 0.33]])
+# emis = np.array([[298.15, 0.21], [383.15, 0.33]])
+emis = np.array([[298.15, 0.0], [383.15, 0.0]])
+# htcs = (50.0, 50.0)
+htcs = (0.0, 0.0)
 
-test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=400.0, emis=emis, htcs=(50.0, 50.0), length=0.100)
+test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=400.0, emis=emis, htcs=htcs, length=0.010)
 
-init_temps = load_init_temps("copper_steadystate.csv")
-# init_temps = np.full(100, 298.15)
-# heat_fluxs = array([[0.0, 0.5e6, 0.0],
-#                     [1.0, 0.0, 0.0],
-#                     [2.0, 0.5e6, 0.0],
-#                     [3.0, 0.0, 0.0],
-#                     [4.0, 0.5e6, 0.0]])
-# heat_fluxs = array([[0.0, 0.5e6, 0.0]])
-heat_fluxs = np.array([[0.0, 0.5e6, 0.0], [0.9, 0.5e6, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.1, 0.5e6, 0.0]])
-gas_temps = np.array([[0.0, 2000.0, 298.15], [0.9, 2000.0, 298.15], [1.0, 298.15, 298.15], [2.0, 298.15, 298.15], [2.1, 2000.0, 298.15]])
+init_temps = np.full(20, 298.15)
+heat_fluxs = np.array([[0.0, 0.5e6, 0.0]])
+gas_temps = np.array([[0.0, 2000.0, 298.15]])  
 
-test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=300.0, spatial_res=100, min_sim_time=10.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
+# init_temps = load_init_temps("copper_steadystate.csv")
+# heat_fluxs = np.array([[0.0, 0.5e6, 0.0], [0.9, 0.5e6, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.1, 0.5e6, 0.0]])
+# gas_temps = np.array([[0.0, 2000.0, 298.15], [0.9, 2000.0, 298.15], [1.0, 298.15, 298.15], [2.0, 298.15, 298.15], [2.1, 2000.0, 298.15]])
 
-test.run_simulation(True, 10000)
+test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=298.15, spatial_res=20, min_sim_time=1.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
+
+test.run_simulation(True, 1000)
 print("Final temperatures:", test._final_temps)
