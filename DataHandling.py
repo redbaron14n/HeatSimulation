@@ -69,12 +69,12 @@ def save_data(data: NDArray[np.float64], filename: str):
     print("Data saved successfully.")
 
 
-def load_init_temps(filename: str) -> NDArray[np.float64]:
+def load_init_temps(filename: Path) -> NDArray[np.float64]:
 
     """
-    Load an initial temperature disitribution from a .csv file.
+    Load an initial temperature distribution from a .csv file.
 
-    :param str filename: The name of the file to load the initial temperatures from.
+    :param Path filename: The path to the file to load the initial temperatures from.
     :return: The initial temperature distribution.
     """
 

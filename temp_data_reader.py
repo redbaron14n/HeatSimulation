@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from DataHandling import load_points, load_temp_data
+from DataHandling import load_init_temps, load_points, load_temp_data
 from matplotlib.animation import FFMpegWriter, FuncAnimation
 from matplotlib.widgets import Slider
 import numpy as np
@@ -116,8 +116,25 @@ def minimum_curve_plot(csv_path: Path):
     plt.show()
 
 
+def linear_regression_plot(csv_path: Path, subject_length: float = 0.100):
+
+    temps = np.asarray(load_init_temps(csv_path)).ravel()
+    x_positions = np.linspace(0.0, subject_length, temps.shape[0])
+    slope, intercept = np.polyfit(x_positions, temps, 1)
+    regression_line = slope * x_positions + intercept
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_xlabel('Position [m]')
+    ax.set_ylabel('Temperature [K]')
+    ax.set_title("Linear Regression of Steady-state Temperature Distribution")
+    ax.grid(True)
+    ax.plot(x_positions, temps, label="Data")
+    ax.plot(x_positions, regression_line, linestyle="--", color="#CE1483", label=f"Fit: y = {slope:.4g}x + {intercept:.4g}")
+    ax.legend()
+    plt.show()
+
 
 # positions_over_time_plot(Path("copper_chop.csv"))
-# time_evolution_plot(Path("copper_simple.csv"))
+# time_evolution_plot(Path("copper_heating.csv"))
 # minimum_curve_plot(Path("copper_minimums.csv"))
-save_evo_video(Path("copper_simple_heating.csv"), Path("copper_simple_heating.mp4"), subject_length=0.01, fps=30, vid_length=10.0, max_sim_time=100.0)
+# save_evo_video(Path("copper_heating.csv"), Path("copper_heating.mp4"), subject_length=0.100, fps=30, vid_length=10.0, max_sim_time=2000.0)
+linear_regression_plot(Path("copper_steadystate.csv"), subject_length=0.100)
