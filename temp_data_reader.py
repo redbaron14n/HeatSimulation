@@ -45,7 +45,7 @@ def time_evolution_plot(csv_path: Path, subject_length: float = 1.0):
     plt.show()
 
 
-def save_evo_video(csv_path: Path, output_path: Path, subject_length: float = 1.0, fps: int = 30, vid_length: float = 10.0, max_sim_time: float = 100.0):
+def save_evo_video(csv_path: Path, output_path: Path, subject_length: float = 1.0, fps: int = 30, vid_length: float = 10.0, max_sim_time: float = 100.0, accel_power: float = 2.5):
 
     output_path = Path(f"Data/{output_path}")
     times, temps = load_temp_data(csv_path)
@@ -67,9 +67,20 @@ def save_evo_video(csv_path: Path, output_path: Path, subject_length: float = 1.
         return profile_line,
 
     end_index = np.searchsorted(times, max_sim_time, side="right")
-    target_frames = int(fps * vid_length)
-    step = max(1, end_index // target_frames)
-    frame_indices = range(0, end_index, step)
+    target_frames = max(2, int(fps * vid_length))
+
+    if end_index < 2:
+        raise ValueError("Not enough simulation points in the selected time window to build a video.")
+
+    # Bias frame density toward early times (more detail early, faster progression later).
+    fractions = np.linspace(0.0, 1.0, target_frames)
+    eased_fractions = fractions**accel_power
+    frame_indices = np.unique(np.rint(eased_fractions * (end_index - 1)).astype(int))
+
+    # Ensure the final selected point is included so late-time behavior is captured.
+    if frame_indices[-1] != end_index - 1:
+        frame_indices = np.append(frame_indices, end_index - 1)
+
     anim = FuncAnimation(fig, set_frame, frames=frame_indices, interval=100, blit=False)
     print(f"Saving video to {output_path}...")
     anim.save(output_path, writer=FFMpegWriter(fps=fps))
@@ -136,5 +147,5 @@ def linear_regression_plot(csv_path: Path, subject_length: float = 0.100):
 # positions_over_time_plot(Path("copper_chop.csv"))
 # time_evolution_plot(Path("copper_heating.csv"))
 # minimum_curve_plot(Path("copper_minimums.csv"))
-# save_evo_video(Path("copper_heating.csv"), Path("copper_heating.mp4"), subject_length=0.100, fps=30, vid_length=10.0, max_sim_time=2000.0)
-linear_regression_plot(Path("copper_steadystate.csv"), subject_length=0.100)
+# save_evo_video(Path("copper_middle_heating.csv"), Path("copper_middle_heating.mp4"), subject_length=0.010, fps=30, vid_length=10.0, max_sim_time=2000.0)
+linear_regression_plot(Path("copper_middle_steadystate.csv"), subject_length=0.010)
