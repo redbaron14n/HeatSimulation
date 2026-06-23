@@ -5,7 +5,7 @@
 # ###################
 
 import numpy as np
-from ConductiveSystem import ConductiveSystem1D
+from ConductiveSystem import ConductiveSystem1D, ConductiveSystemAxial
 from DataHandling import load_init_temps, save_procedure
 from numpy.typing import NDArray
 
@@ -410,10 +410,11 @@ class FiniteDiffSolver1D:
         h_vals = np.where(side_mask, h[0], h[1])
 
         cond_terms = self._diff_num * (right - 2 * internal_t + left)
-        conv_terms = -h_vals * bf * (internal_t - gas_temp_dist)
-        rad_terms = -emis_data[1:-1] * BOLTZ * bf * (internal_t**4 - self._ambient_temp**4)
+        # conv_terms = -h_vals * bf * (internal_t - gas_temp_dist)
+        # rad_terms = -emis_data[1:-1] * BOLTZ * bf * (internal_t**4 - self._ambient_temp**4)
 
-        T_new[1:-1] = internal_t + cond_terms + conv_terms + rad_terms
+        # T_new[1:-1] = internal_t + cond_terms + conv_terms + rad_terms
+        T_new[1:-1] = internal_t + cond_terms
         return T_new
 
 
@@ -523,8 +524,8 @@ class FiniteDiffSolver1D:
             emis = emis_lookup[temps.astype(int)]
             emis0, emis1 = emis[0], emis[-1]
             T_new[0] = self._solve_boundary_temp(k, emis0, htcs[0], T_inside0, gas_temp0, flux0)
-            # T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
-            T_new[-1] = 298.15
+            T_new[-1] = self._solve_boundary_temp(k, emis1, htcs[1], T_inside1, gas_temp1, flux1)
+            # T_new[-1] = 298.15
             T_new = self._iterate_internal_temps(T_new, temps, (gas_temp0, gas_temp1), emis, htcs, big_factor)
             converged = self._check_convergence(T_new, temps, tick, print_every)
             if store:
@@ -538,23 +539,287 @@ class FiniteDiffSolver1D:
             save_procedure(self._raw_temp_map, self._final_temps)
 
 
-# test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=40.0, emis=(0.5, 0.5), htcs=(316.227766, 100.0), length=0.100)
-# emis = np.array([[298.15, 0.21], [383.15, 0.33]])
-emis = np.array([[298.15, 0.0], [383.15, 0.0]])
-# htcs = (50.0, 50.0)
-htcs = (0.0, 0.0)
+class FiniteDiffSolverAxial:
 
-test_system = ConductiveSystem1D(peri=0.0314, area=78.5e-6, cphc=418.0, dens=8960.0, diff=1.58e-4, cond=400.0, emis=emis, htcs=htcs, length=0.010)
+    def __init__(
+            self,
+            system: ConductiveSystemAxial,
+            initial_temps: NDArray[np.float64] | None = None,
+            torch_fluxs: NDArray[np.float64] = np.array([[0.0, 0.0, 0.0]]),
+            gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
+            env_cutoff: float = 0.0,
+            ambient_temp: float = 298.15,
+            x_res: int = 25,
+            r_res: int = 25,
+            min_sim_time: float = 0.0,
+            max_sim_time: float = 100.0,
+            diff_num: float = 0.1,
+            conv_tol: float = 1e-6
+    ):
+        
 
-init_temps = np.full(20, 298.15)
-heat_fluxs = np.array([[0.0, 0.5e6, 0.0]])
-gas_temps = np.array([[0.0, 2000.0, 298.15]])  
+        """
+        :param system: The conductive system to be solved.
+        :param initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
+        :param torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. The first column is time and the second and third columns are the new constant heat fluxes at the left and right boundaries introduced at that time. Default is no torch flux.
+        :param gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures surrounding the left and right sections introduced at that time. Default is room temperature (298.15 K) on both sides.
+        :param env_cutoff: The cutoff distance (as a proportion of the system length) where left side gas temperatures, heat transfer coefficients switch to right side values. Defaults to 0.0, meaning left side values are used for the left face only.
+        :param ambient_temp: The ambient temperature for the simulation [K].
+        :param x_res: The number of spatial points to use in the finite difference grid along the length of the system.
+        :param r_res: The number of spatial points to use in the finite difference grid along the radius of the system.
+        :param min_sim_time: The minimum simulation time to run the solver for [s].
+        :param max_sim_time: The maximum simulation time to run the solver for [s].
+        :param diff_num: The diffusion number to use for numerical stability.
+        :param conv_tol: The tolerance for convergence of the iterative solver.
+        """
 
-# init_temps = load_init_temps("copper_steadystate.csv")
-# heat_fluxs = np.array([[0.0, 0.5e6, 0.0], [0.9, 0.5e6, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.1, 0.5e6, 0.0]])
-# gas_temps = np.array([[0.0, 2000.0, 298.15], [0.9, 2000.0, 298.15], [1.0, 298.15, 298.15], [2.0, 298.15, 298.15], [2.1, 2000.0, 298.15]])
+        self.system = system
+        self.torch_heat_fluxes = torch_fluxs
+        self.gas_temperatures = gas_temps
+        self.env_cutoff = env_cutoff
+        self.ambient_temperature = ambient_temp
+        self.x_resolution = x_res
+        self.r_resolution = r_res
+        self.initial_temperatures = initial_temps
+        self.min_simulation_time = min_sim_time
+        self.max_simulation_time = max_sim_time
+        self.diffusion_number = diff_num
+        self.convergence_tol = conv_tol
 
-test = FiniteDiffSolver1D(test_system, initial_temps=init_temps, torch_fluxs=heat_fluxs, gas_temps=gas_temps, env_cutoff=0.3, ambient_temp=298.15, spatial_res=20, min_sim_time=1.0, max_sim_time=10000.0, diff_num=0.1, conv_tol=1e-12)
 
-test.run_simulation(True, 1000)
-print("Final temperatures:", test._final_temps)
+    ########################################
+    # Getters and Setters
+    ########################################
+
+
+    @property
+    def system(self) -> ConductiveSystemAxial:
+
+        """
+        :return: The conductive system under analysis.
+        """
+
+        return self._system
+    
+
+    @system.setter
+    def system(self, system: ConductiveSystemAxial):
+
+        self._system = system
+        self._update_x_step()
+        self._update_r_step()
+
+
+    @property
+    def torch_heat_fluxes(self) -> NDArray[np.float64]:
+
+        """
+        :return: The heat fluxes from the torch at the boundaries [W/m^2].
+        """
+
+        return self._torch_fluxs
+    
+
+    @torch_heat_fluxes.setter
+    def torch_heat_fluxes(self, fluxs: NDArray[np.float64]):
+
+        if fluxs.shape[1] != 3:
+            raise ValueError("Torch heat fluxes must be a 2D array with shape (N, 3).")
+        if not np.all(fluxs[:, 0] >= 0):
+            raise ValueError("Torch heat flux times must be non-negative.")
+        self._torch_fluxs = fluxs
+
+
+    @property
+    def gas_temperatures(self) -> NDArray[np.float64]:
+
+        """
+        :return: The temperatures of the gas at the boundaries [K].
+        """
+
+        return self._gas_temps
+    
+
+    @gas_temperatures.setter
+    def gas_temperatures(self, temps: NDArray[np.float64]):
+
+        if temps.shape[1] != 3:
+            raise ValueError("Gas temperatures must be a 2D array with shape (N, 3).")
+        if not np.all(temps[:, 0] >= 0):
+            raise ValueError("Gas temperature times must be non-negative.")
+        if not np.all(temps[:, 1:] > 0):
+            raise ValueError("Gas temperatures must be positive.")
+        self._gas_temps = temps
+
+
+    @property
+    def env_cutoff(self) -> float:
+
+        """
+        :return: The cutoff distance (as a proportion of the system length) where left side gas temperatures and heat transfer coefficients switch to right side values.
+        """
+
+        return self._env_cutoff
+    
+
+    @env_cutoff.setter
+    def env_cutoff(self, cutoff: float):
+
+        if not 0 <= cutoff <= 1:
+            raise ValueError("Environment cutoff must be a proportion between 0 and 1 inclusive.")
+        self._env_cutoff = cutoff
+        self._update_cutoff_index()
+
+
+    @property
+    def ambient_temperature(self) -> float:
+
+        """
+        :return: The ambient temperature for the simulation [K].
+        """
+
+        return self._ambient_temp
+    
+
+    @ambient_temperature.setter
+    def ambient_temperature(self, temp: float):
+
+        if temp < 0:
+            raise ValueError("Ambient temperature must be non-negative.")
+        self._ambient_temp = temp
+
+
+    @property
+    def x_resolution(self) -> int:
+
+        """
+        :return: The number of spatial points in the finite difference grid along the length of the system.
+        """
+
+        return self._x_res
+    
+
+    @x_resolution.setter
+    def x_resolution(self, points: int):
+
+        if points < 2:
+            raise ValueError("Number of spatial points along the length must be at least 2.")
+        self._x_res = points
+        self._update_x_step()
+        self._update_cutoff_index()
+
+
+    @property
+    def r_resolution(self) -> int:
+
+        """
+        :return: The number of spatial points in the finite difference grid along the radius of the system.
+        """
+
+        return self._r_res
+    
+
+    @r_resolution.setter
+    def r_resolution(self, points: int):
+
+        if points < 2:
+            raise ValueError("Number of spatial points along the radius must be at least 2.")
+        self._r_res = points
+        self._update_r_step()
+
+
+    @property
+    def initial_temperatures(self) -> NDArray[np.float64]:
+
+        """
+        :return: The initial temperatures for the finite difference grid [K].
+        """
+
+        return self._init_temps
+    
+
+    @initial_temperatures.setter
+    def initial_temperatures(self, initial_temps: NDArray[np.float64] | None):
+
+        shape = (self._x_res, self._r_res)
+        if initial_temps is None:
+            initial_temps = np.full(shape, self._ambient_temp)
+        elif initial_temps.shape != shape:
+            raise ValueError(f"Initial temperatures must be a 2D array with shape {shape}.")
+        self._init_temps = initial_temps
+
+
+    @property
+    def min_simulation_time(self) -> float:
+
+        """
+        :return: The minimum simulation time [s].
+        """
+
+        return self._min_time
+    
+
+    @min_simulation_time.setter
+    def min_simulation_time(self, min_time: float):
+
+        if min_time < 0.0:
+            raise ValueError("Minimum simulation time must be non-negative.")
+        self._min_time = min_time
+
+
+    @property
+    def max_simulation_time(self) -> float:
+
+        """
+        :return: The maximum simulation time [s].
+        """
+
+        return self._max_time
+
+
+    @max_simulation_time.setter
+    def max_simulation_time(self, max_time: float):
+
+        if max_time <= 0.0:
+            raise ValueError("Maximum simulation time must be greater than 0.")
+        elif max_time <= self._min_time:
+            raise ValueError("Maximum simulation time must be greater than minimum simulation time.")
+        self._max_time = max_time
+        self._update_t_step()
+
+
+    @property
+    def diffusion_number(self) -> float:
+
+        """
+        :return: The diffusion number to use for numerical stability.
+        """
+
+        return self._diff_num
+    
+
+    @diffusion_number.setter
+    def diffusion_number(self, diff_num: float):
+
+        if diff_num <= 0 or diff_num > 0.5:
+            raise ValueError("Diffusion number must be greater than 0 and less than or equal to 0.5 for numerical stability.")
+        self._diff_num = diff_num
+        self._update_t_step()
+
+
+    @property
+    def convergence_tol(self) -> float:
+
+        """
+        :return: The tolerance for convergence of the iterative solver.
+        """
+
+        return self._conv_tol
+
+
+    @convergence_tol.setter
+    def convergence_tol(self, conv_tol: float):
+
+        if conv_tol <= 0:
+            raise ValueError("Convergence tolerance must be positive.")
+        self._conv_tol = conv_tol
