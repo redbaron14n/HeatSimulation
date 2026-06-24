@@ -5,7 +5,7 @@
 # ###################
 
 import numpy as np
-from ConductiveSystem import ConductiveSystem1D
+from ConductiveSystem import ConductiveSystem1D, ConductiveSystemAxial
 from DataHandling import load_init_temps, save_procedure
 from numpy.typing import NDArray
 from pathlib import Path
@@ -461,3 +461,555 @@ ambient_temp = 300.
 test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps, htcs, ambient_temp, x_res, min_sim_time=1.0)
 
 test_solver.run_simulation(conv_tol=1e-6, print_every=10000)
+
+
+class FiniteDiffSolverAxial:
+
+    def __init__(
+            self,
+            system: ConductiveSystemAxial,
+            initial_temps: NDArray[np.float64] | None = None,
+            torch_fluxs: NDArray[np.float64] = np.array([[0.0, 0.0, 0.0]]),
+            gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
+            env_cutoff: float = 0.0,
+            ambient_temp: float = 298.15,
+            x_res: int = 25,
+            r_res: int = 25,
+            min_sim_time: float = 0.0,
+            max_sim_time: float = 100.0,
+            diff_num: float = 0.1,
+            conv_tol: float = 1e-6
+    ):
+        
+
+        """
+        :param system: The conductive system to be solved.
+        :param initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
+        :param torch_fluxs: The heat fluxes from the torch at the boundaries [W/m^2] where positive is into the material. The first column is time and the second and third columns are the new constant heat fluxes at the left and right boundaries introduced at that time. Default is no torch flux.
+        :param gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures surrounding the left and right sections introduced at that time. Default is room temperature (298.15 K) on both sides.
+        :param env_cutoff: The cutoff distance (as a proportion of the system length) where left side gas temperatures, heat transfer coefficients switch to right side values. Defaults to 0.0, meaning left side values are used for the left face only.
+        :param ambient_temp: The ambient temperature for the simulation [K].
+        :param x_res: The number of spatial points to use in the finite difference grid along the length of the system.
+        :param r_res: The number of spatial points to use in the finite difference grid along the radius of the system.
+        :param min_sim_time: The minimum simulation time to run the solver for [s].
+        :param max_sim_time: The maximum simulation time to run the solver for [s].
+        :param diff_num: The diffusion number to use for numerical stability.
+        :param conv_tol: The tolerance for convergence of the iterative solver.
+        """
+
+        self.system = system
+        self.torch_heat_fluxes = torch_fluxs
+        self.gas_temperatures = gas_temps
+        self.env_cutoff = env_cutoff
+        self.ambient_temperature = ambient_temp
+        self.x_resolution = x_res
+        self.r_resolution = r_res
+        self.initial_temperatures = initial_temps
+        self.min_simulation_time = min_sim_time
+        self.max_simulation_time = max_sim_time
+        self.diffusion_number = diff_num
+        self.convergence_tol = conv_tol
+
+
+    ########################################
+    # Getters and Setters
+    ########################################
+
+
+    @property
+    def system(self) -> ConductiveSystemAxial:
+
+        """
+        :return: The conductive system under analysis.
+        """
+
+        return self._system
+    
+
+    @system.setter
+    def system(self, system: ConductiveSystemAxial):
+
+        self._system = system
+        self._update_x_step()
+        self._update_r_step()
+
+
+    @property
+    def torch_heat_fluxes(self) -> NDArray[np.float64]:
+
+        """
+        :return: The heat fluxes from the torch at the boundaries [W/m^2].
+        """
+
+        return self._torch_fluxs
+    
+
+    @torch_heat_fluxes.setter
+    def torch_heat_fluxes(self, fluxs: NDArray[np.float64]):
+
+        if fluxs.shape[1] != 3:
+            raise ValueError("Torch heat fluxes must be a 2D array with shape (N, 3).")
+        if not np.all(fluxs[:, 0] >= 0):
+            raise ValueError("Torch heat flux times must be non-negative.")
+        self._torch_fluxs = fluxs
+
+
+    @property
+    def gas_temperatures(self) -> NDArray[np.float64]:
+
+        """
+        :return: The temperatures of the gas at the boundaries [K].
+        """
+
+        return self._gas_temps
+    
+
+    @gas_temperatures.setter
+    def gas_temperatures(self, temps: NDArray[np.float64]):
+
+        if temps.shape[1] != 3:
+            raise ValueError("Gas temperatures must be a 2D array with shape (N, 3).")
+        if not np.all(temps[:, 0] >= 0):
+            raise ValueError("Gas temperature times must be non-negative.")
+        if not np.all(temps[:, 1:] > 0):
+            raise ValueError("Gas temperatures must be positive.")
+        self._gas_temps = temps
+
+
+    @property
+    def env_cutoff(self) -> float:
+
+        """
+        :return: The cutoff distance (as a proportion of the system length) where left side gas temperatures and heat transfer coefficients switch to right side values.
+        """
+
+        return self._env_cutoff
+    
+
+    @env_cutoff.setter
+    def env_cutoff(self, cutoff: float):
+
+        if not 0 <= cutoff <= 1:
+            raise ValueError("Environment cutoff must be a proportion between 0 and 1 inclusive.")
+        self._env_cutoff = cutoff
+        self._update_cutoff_index()
+
+
+    @property
+    def ambient_temperature(self) -> float:
+
+        """
+        :return: The ambient temperature for the simulation [K].
+        """
+
+        return self._ambient_temp
+    
+
+    @ambient_temperature.setter
+    def ambient_temperature(self, temp: float):
+
+        if temp < 0:
+            raise ValueError("Ambient temperature must be non-negative.")
+        self._ambient_temp = temp
+
+
+    @property
+    def x_resolution(self) -> int:
+
+        """
+        :return: The number of spatial points in the finite difference grid along the length of the system.
+        """
+
+        return self._x_res
+    
+
+    @x_resolution.setter
+    def x_resolution(self, points: int):
+
+        if points < 2:
+            raise ValueError("Number of spatial points along the length must be at least 2.")
+        self._x_res = points
+        self._update_x_step()
+        self._update_cutoff_index()
+
+
+    @property
+    def r_resolution(self) -> int:
+
+        """
+        :return: The number of spatial points in the finite difference grid along the radius of the system.
+        """
+
+        return self._r_res
+    
+
+    @r_resolution.setter
+    def r_resolution(self, points: int):
+
+        if points < 2:
+            raise ValueError("Number of spatial points along the radius must be at least 2.")
+        self._r_res = points
+        self._update_r_step()
+
+
+    @property
+    def initial_temperatures(self) -> NDArray[np.float64]:
+
+        """
+        :return: The initial temperatures for the finite difference grid [K].
+        """
+
+        return self._init_temps
+    
+
+    @initial_temperatures.setter
+    def initial_temperatures(self, initial_temps: NDArray[np.float64] | None):
+
+        shape = (self._r_res, self._x_res)
+        if initial_temps is None:
+            initial_temps = np.full(shape, self._ambient_temp)
+        elif initial_temps.shape != shape:
+            raise ValueError(f"Initial temperatures must be a 2D array with shape {shape}.")
+        self._init_temps = initial_temps
+
+
+    @property
+    def min_simulation_time(self) -> float:
+
+        """
+        :return: The minimum simulation time [s].
+        """
+
+        return self._min_time
+    
+
+    @min_simulation_time.setter
+    def min_simulation_time(self, min_time: float):
+
+        if min_time < 0.0:
+            raise ValueError("Minimum simulation time must be non-negative.")
+        self._min_time = min_time
+
+
+    @property
+    def max_simulation_time(self) -> float:
+
+        """
+        :return: The maximum simulation time [s].
+        """
+
+        return self._max_time
+
+
+    @max_simulation_time.setter
+    def max_simulation_time(self, max_time: float):
+
+        if max_time <= 0.0:
+            raise ValueError("Maximum simulation time must be greater than 0.")
+        elif max_time <= self._min_time:
+            raise ValueError("Maximum simulation time must be greater than minimum simulation time.")
+        self._max_time = max_time
+        self._update_t_step()
+
+
+    @property
+    def diffusion_number(self) -> float:
+
+        """
+        :return: The diffusion number to use for numerical stability.
+        """
+
+        return self._diff_num
+    
+
+    @diffusion_number.setter
+    def diffusion_number(self, diff_num: float):
+
+        if diff_num <= 0 or diff_num > 0.5:
+            raise ValueError("Diffusion number must be greater than 0 and less than or equal to 0.5 for numerical stability.")
+        self._diff_num = diff_num
+        self._update_t_step()
+
+
+    @property
+    def convergence_tol(self) -> float:
+
+        """
+        :return: The tolerance for convergence of the iterative solver.
+        """
+
+        return self._conv_tol
+
+
+    @convergence_tol.setter
+    def convergence_tol(self, conv_tol: float):
+
+        if conv_tol <= 0:
+            raise ValueError("Convergence tolerance must be positive.")
+        self._conv_tol = conv_tol
+
+
+    ########################################
+    # Private Methods
+    ########################################
+
+
+    def _validate_init_temps(self):
+
+        if self._init_temps.shape != (self._x_res, self._r_res):
+            raise ValueError(f"Initial temperatures must be a 2D array with shape ({self._x_res}, {self._r_res}).")
+        
+
+    def _update_x_step(self):
+
+        if not hasattr(self, "_x_res"):
+            return
+        self._x_step = self._system.length / (self._x_res - 1)
+        self._update_t_step()
+
+
+    def _update_r_step(self):
+
+        if not hasattr(self, "_r_res"):
+            return
+        self._r_step = self._system.radius / (self._r_res - 1)
+        self._update_t_step()
+
+
+    def _update_t_step(self):
+
+        if not hasattr(self, "_diff_num"):
+            return
+        self._t_step = self._diff_num / (self._system.diffusivity * (self._x_step**(-2) + 2*self._r_step**(-2)))
+
+
+    def _update_tick_count(self):
+
+        if not hasattr(self, "_t_step"):
+            return
+        self._tick_count = int(self._max_time / self._t_step)
+
+
+    def _update_cutoff_index(self):
+
+        if not hasattr(self, "_x_res"):
+            return
+        self._cutoff_index = round(self._env_cutoff * (self._x_res - 1))
+
+
+    def _select_root(self, roots: NDArray[np.complexfloating] | NDArray[np.floating]) -> float:
+
+        """
+        Selects the appropriate root from the quartic equation based on physical constraints (real and positive).
+
+        :param roots: The array of roots from the quartic equation.
+        :return: The selected root that represents the boundary temperature [K].
+        """
+
+        real_roots = roots[abs(roots.imag) < 1e-10].real
+        positive_real_roots = real_roots[real_roots > 0]
+        if len(positive_real_roots) == 0:
+            raise ValueError("No valid positive real roots found for boundary temperature.")
+        if len(positive_real_roots) > 1:
+            raise ValueError("Multiple positive real roots found for boundary temperature; unable to select unique solution.")
+        return positive_real_roots[0]
+    
+
+    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], tick: int, print_every: int) -> bool:
+
+        """
+        Determines if the simulation converged after completing another tick by computing the sum of the squares of the difference between the cells. Also prints update statements.
+
+        :param T_new: The newest 2D array of temperatures.
+        :param T_old: The 2D array of temperatures from last tick.
+        :param tick: The current calculation iteration.
+        :param print_every: How many ticks should pass before printing another update.
+        """
+
+        sum_square = ((T_new - T_old)**2).sum()
+        if print_every > 0 and tick % print_every == 0:
+            print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
+        finished = (sum_square <= self._conv_tol) and (tick * self._t_step >= self._min_time)
+        return finished
+    
+
+    def _build_lookup_tables(self, times) -> tuple[tuple[NDArray[np.float64], NDArray[np.float64]], tuple[NDArray[np.float64], NDArray[np.float64]], NDArray[np.float64]]:
+
+        """
+        Build lookup tables for the simulation data. Drastically reduces the computational cost of interpolation during the simulation.
+
+        :param times: The time points for which to build the lookup tables.
+        :return: A tuple of the lookup tables for flux, gas temperature, and emissivity.
+        """
+
+        flux_data = self._torch_fluxs
+        gas_data = self._gas_temps
+        emis_data = self._system.emissivities
+
+        flux0_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 1], left=0.0)
+        flux1_lookup = np.interp(times, flux_data[:, 0], flux_data[:, 2], left=0.0)
+        gas_temp0_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 1], left=298.15)
+        gas_temp1_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 2], left=298.15)
+        emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1), emis_data[:, 0], emis_data[:, 1])
+
+        fluxs = (flux0_lookup, flux1_lookup)
+        gasses = (gas_temp0_lookup, gas_temp1_lookup)
+
+        return fluxs, gasses, emis_lookup
+    
+
+    def _calc_top_left_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float, torch_flux: float) -> float:
+
+        """
+        Solves for the temperature [K] subject to both the left face and radial out boundary conditions using a weighted face-area method. Ax*(Ta - T)/dx + Ar*(T - Tb) = dr*Tx + dx*Tr
+
+        :param emis: The emissivity of the material at its temperature.
+        :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
+        :param temp_gas: The temperature of the gas outside this point [K].
+        :param temp_a: The temperature of the material one node over in the x-axis [K].
+        :param temp_b: The temperature of the material one node below in the r-axis [K].
+        :param torch_flux: The heat flux entering the system from the torch [W/m^2].
+        :return: The temperature at the node resulting from heat transfer [K].
+        """
+
+        dy = self._x_step * self._r_step**2 - self._x_step**2 * self._r_step # Convenience factor
+        a4 = emis * BOLTZ * dy
+
+        k = self._system.conductivity
+        a1 = h * dy + k * (self._r_step**2 - self._x_step**2)
+
+        a00 = h * dy * temp_gas
+        a01 = emis * BOLTZ * dy * self._ambient_temp**4
+        a02 = torch_flux * self._x_step * self._r_step**2
+        a03 = k * self._r_step**2 * temp_a
+        a04 = k * self._x_step**2 * temp_b
+        a0 = -a00 - a01 - a02 - a03 + a04
+
+        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        return temp_corner
+    
+
+    def _calc_top_right_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float, torch_flux: float) -> float:
+
+        """
+        Solves for the temperature [K] subject to both the right face and radial out boundary conditions using a weighted face-area method. Largely the same as the top-left corner but with a few sign changes. Ax*(T - Ta)/dx + Ar*(T - Tb) = dr*Tx + dx*Tr
+
+        :param emis: The emissivity of the material at its temperature.
+        :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
+        :param temp_gas: The temperature of the gas outside this point [K].
+        :param temp_a: The temperature of the material one node before in the x-axis [K].
+        :param temp_b: The temperature of the material one node below in the r-axis [K].
+        :param torch_flux: The heat flux entering the system from the torch [W/m^2].
+        :return: The temperature at the node resulting from heat transfer [K].
+        """
+
+        dy = self._x_step * self._r_step**2 + self._x_step**2 * self._r_step
+        a4 = -emis * BOLTZ * dy
+
+        k = self._system.conductivity
+        a1 = -h * dy - k * (self._x_step**2 + self._r_step**2)
+
+        a00 = h * dy * temp_gas
+        a01 = emis * BOLTZ * dy * self._ambient_temp**4
+        a02 = torch_flux * self._x_step * self._r_step**2
+        a03 = k * self._r_step**2 * temp_a
+        a04 = k * self._x_step**2 * temp_b
+        a0 = a00 + a01 + a02 + a03 + a04
+
+        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        return temp_corner
+    
+
+    def _calc_bottom_left_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float, torch_flux: float) -> float:
+
+        """
+        Solves for the temperature [K] subject to both the left face and inner zero slope symmetry boundary conditions using a weighted face-area method. Ax*(Ta - T)/dx + Ar*(Tb - T) = dr*Tx
+
+        :param emis: The emissivity of the material at its temperature.
+        :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
+        :param temp_gas: The temperature of the gas outside this point [K].
+        :param temp_a: The temperature of the material one node over in the x-axis [K].
+        :param temp_b: The temperature of the material one node above in the r-axis [K].
+        :param torch_flux: The heat flux entering the system from the torch [W/m^2].
+        :return: The temperature at the node resulting from heat transfer [K].
+        """
+
+        dy = self._x_step * self._r_step**2
+        a4 = emis * BOLTZ * dy
+
+        k = self._system.conductivity
+        a1 = h * dy + k * (self._r_step**2 + 2 * self._x_step**2)
+
+        a00 = h * dy * temp_gas
+        a01 = emis * BOLTZ * dy * self._ambient_temp**4
+        a02 = torch_flux * dy
+        a03 = k * self._r_step**2 * temp_a
+        a04 = 2 * k * self._x_step**2 * temp_b
+        a0 = -a00 - a01 - a02 - a03 - a04
+
+        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        return temp_corner
+    
+
+    def _calc_bottom_right_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float, torch_flux: float) -> float:
+
+        """
+        Solves for the temperature [K] subject to both the right face and inner zero slope symmetry boundary conditions using a weighted face-area method. Largely the same as the bottom-left corner but with a few sign changes. Ax*(T - Ta)/dx + Ar*(Tb - T) = dr*Tx
+
+        :param emis: The emissivity of the material at its temperature.
+        :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
+        :param temp_gas: The temperature of the gas outside this point [K].
+        :param temp_a: The temperature of the material one node before in the x-axis [K].
+        :param temp_b: The temperature of the material one node above in the r-axis [K].
+        :param torch_flux: The heat flux entering the system from the torch [W/m^2].
+        :return: The temperature at the node resulting from heat transfer [K].
+        """
+
+        dy = self._x_step * self._r_step**2
+        a4 = -emis * BOLTZ * dy
+
+        k = self._system.conductivity
+        a1 = -h * dy - k * (self._r_step**2 - 2 * self._x_step**2)
+
+        a00 = h * dy * temp_gas
+        a01 = emis * BOLTZ * dy * self._ambient_temp**4
+        a02 = torch_flux * dy
+        a03 = k * self._r_step**2 * temp_a
+        a04 = 2 * k * self._x_step**2 * temp_b
+        a0 = a00 + a01 + a02 + a03 - a04
+
+        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        return temp_corner
+    
+
+emis_a = np.array([[298.15, 0.21], [383.15, 0.33]])
+htcs_a = (50.0, 50.0)
+
+test_system_a = ConductiveSystemAxial(
+    diff = 1.58e-4,
+    cond = 400.0,
+    emis = emis_a,
+    htcs = htcs_a,
+    length = 0.01,
+    radius = 0.05
+)
+
+x_res_a = 100
+r_res_a = 25
+init_temps_a = np.full((r_res_a, x_res_a), 298.15)
+torch_fluxs_a = np.array([[0.0, 0.5e6, 0.0]])
+gas_temps_a = np.array([[0.0, 2000.0, 298.15]])
+
+test_solver_a = FiniteDiffSolverAxial(
+    system = test_system_a,
+    x_res = x_res_a,
+    r_res = r_res_a,
+    initial_temps = init_temps_a,
+    torch_fluxs = torch_fluxs_a,
+    gas_temps = gas_temps_a
+)
+
+print(test_solver_a._calc_top_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
+print(test_solver_a._calc_top_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
+print(test_solver_a._calc_bottom_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
+print(test_solver_a._calc_bottom_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
