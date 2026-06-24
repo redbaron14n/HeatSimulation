@@ -151,6 +151,8 @@ class ConductiveSystemAxial:
         self.conductivity = cond
         self.emissivities = emis
         self.heat_transfer_coefs = htcs
+        self.density = dens
+        self.heat_capacity = cphc
         self.length = length
         self.radius = radius
 
