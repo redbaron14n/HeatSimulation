@@ -989,25 +989,26 @@ class FiniteDiffSolverAxial:
         """
         Calculates the temperatures subject to the left face boundary condition only.
 
-        :param emis_lookup: The emissivities of the non-corner edge temps at the prior temperatures.
+        :param prev_temps_c01: The temperatures of the first two columns in the array at the previous time-step.
         :param h: The heat transfer coefficient of the left boundary.
+        :param temp_gas: The temperature of the gas outside the left face.
+        :param emis_data: The emissivities of the non-corner edge temps at the prior temperatures.
         :param torch_flux: The heat flux through the left boundary provided by the torch.
-        :param prev_temps_c01: The temperatures of the first two columns in the array at the previous time-step. Transposed so that it has shape (2, N).
         """
 
-        temps_b = prev_temps_c01[0, 1:-1]
-        temps_h = prev_temps_c01[1, 1:-1]
-        temps_alpha = prev_temps_c01[0, :-2]
-        temps_beta = prev_temps_c01[0, 2:]
+        temps_b = prev_temps_c01[1:-1, 0]
+        temps_h = prev_temps_c01[1:-1, 1]
+        temps_alpha = prev_temps_c01[:-2, 0]
+        temps_beta = prev_temps_c01[2:, 0]
 
         dy = 2 / self._x_step
         k = self._system.conductivity
         r_data = self._r_map[1:-1]
 
         a4 = -emis_data * BOLTZ * dy
-        a1_val = (-(k / self._x_step + h) * dy
-              - 2 * k / (self._r_step**2) - self._volcp) # Unlike a4 and a0, this is a scalar
-        a1 = np.full_like(a4, a1_val)
+
+        c1 = (-(k / self._x_step + h) * dy
+              - 2 * k / (self._r_step**2) - self._volcp)
 
         a00 = (k * temps_h / self._x_step
                + h * temp_gas
@@ -1018,6 +1019,43 @@ class FiniteDiffSolverAxial:
         a02 = self._system.density * self._system.heat_capacity * temps_b / self._t_step
         a0 = a00 + a01 + a02
 
+        edge_temps = np.zeros_like(temps_b)
+        for i, (c4, c0) in enumerate(zip(a4, a0)):
+            edge_temps[i] = self._select_root(np.roots([c4, 0, 0, c1, c0]))
+        return edge_temps
+    
+
+    def _calc_top_edge(self, prev_temps_rtop2: NDArray[np.float64], h_data: NDArray[np.float64], emis_data: NDArray[np.float64], gas_temps: NDArray[np.float64]) -> NDArray[np.float64]:
+
+        """
+        Calculates the temperatures subject to the lateral face boundary condition only.
+
+        :param prev_temps_rtop2: The temperatures of the first last two rows in the array at the previous time-step.
+        :param h: The heat transfer coefficients of each point.
+        :param emis_data: The emissivities of the non-corner edge temps at the prior temperatures.
+        :param gas_temps: The gas temperatures outside each node.
+        """
+
+        temps_b = prev_temps_rtop2[1, 1:-1]
+        temps_g = prev_temps_rtop2[1, :-2]
+        temps_h = prev_temps_rtop2[1, 2:]
+        temps_alpha = prev_temps_rtop2[0, 1:-1]
+
+        dy = 2 / self._r_step + 1 / self._system.radius
+        k = self._system.conductivity
+
+        a4 = -emis_data * BOLTZ * dy
+
+        a1 = (-2 * k / (self._x_step**2)
+              - 2 * k / (self._r_step**2)
+              - h_data * dy - self._volcp)
+        
+        a0 = (k * (temps_h + temps_g) / (self._x_step**2)
+              + 2 * k * temps_alpha / (self._r_step**2)
+              + h_data * dy * gas_temps
+              + emis_data * BOLTZ * dy * self._ambient_temp**4
+              + self._volcp * temps_b)
+        
         edge_temps = np.zeros_like(temps_b)
         for i, (c4, c1, c0) in enumerate(zip(a4, a1, a0)):
             edge_temps[i] = self._select_root(np.roots([c4, 0, 0, c1, c0]))
@@ -1038,8 +1076,8 @@ test_system_a = ConductiveSystemAxial(
     radius = 0.05
 )
 
-x_res_a = 100
-r_res_a = 25
+x_res_a = 10
+r_res_a = 7
 init_temps_a = np.full((r_res_a, x_res_a), 298.15)
 torch_fluxs_a = np.array([[0.0, 0.5e6, 0.0]])
 gas_temps_a = np.array([[0.0, 2000.0, 298.15]])
@@ -1053,13 +1091,20 @@ test_solver_a = FiniteDiffSolverAxial(
     gas_temps = gas_temps_a
 )
 
-prev_temps = np.full((2, r_res_a), 298.16751831, dtype=np.float64)
-prev_temps[0, -1] = 298.297053
-prev_temps[0, 0] = 298.297057
+prev_temps = np.full((r_res_a, x_res_a), 298.15, dtype=np.float64)
+temps_c01 = prev_temps[:, 0:2].transpose()
 emis_data = np.full(r_res_a - 2, 0.21)
 
 print(test_solver_a._calc_top_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
 print(test_solver_a._calc_top_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
 print(test_solver_a._calc_bottom_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
 print(test_solver_a._calc_bottom_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
-print(test_solver_a._calc_left_edge(prev_temps, 50.0, 2000.0, emis_data, 500000.0))
+# print(test_solver_a._calc_left_edge(temps_c01, 50.0, 2000.0, emis_data, 500000.0))
+
+temps_rtop2 = init_temps_a[-2:, :] # Top two rows (printed as bottom)
+temps_rtop2[1, 0] = 300
+h_data = np.full(x_res_a-2, 50.0, dtype=np.float64)
+emis_data = np.full_like(h_data, 0.21)
+gas_temps = np.full_like(h_data, 298.15)
+edge_temps = test_solver_a._calc_top_edge(temps_rtop2, h_data, emis_data, gas_temps)
+print(test_solver_a._calc_top_edge(temps_rtop2, h_data, emis_data, gas_temps))
