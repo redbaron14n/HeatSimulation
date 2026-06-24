@@ -130,6 +130,8 @@ class ConductiveSystemAxial:
             cond: float,
             emis: NDArray[np.float64],
             htcs: tuple[float, float],
+            dens: float,
+            cphc: float,
             length: float,
             radius: float
     ):
@@ -139,6 +141,8 @@ class ConductiveSystemAxial:
         :param cond: The thermal conductivity of the material [W/m/K].
         :param emis: The emissivities of the material at and above corresponding temperatures. The first column represents the temperatures [K] and the second column represents the emissivities [dimensionless].
         :param htcs: The heat transfer coefficients at the boundaries [W/m^2/K].
+        :param dens: The density of the system material [kg/m^3].
+        :param cphc: The constant-pressure heat capacity of the system material [J/kg/K].
         :param length: The length of the system [m].
         :param radius: The radius of the system [m].
         """
@@ -232,6 +236,42 @@ class ConductiveSystemAxial:
             if h < 0:
                 raise ValueError("Each heat transfer coefficient must be non-negative.")
         self._htcs = htcs
+
+
+    @property
+    def density(self) -> float:
+
+        """
+        :return: The density of the system material [kg/m^3].
+        """
+
+        return self._dens
+    
+
+    @density.setter
+    def density(self, dens: float):
+
+        if dens <= 0:
+            raise ValueError("The density of the system material must be positive.")
+        self._dens = dens
+
+
+    @property
+    def heat_capacity(self) -> float:
+
+        """
+        :return: The constant-pressure heat capacity of the system material [J/kg/K].
+        """
+
+        return self._cphc
+    
+
+    @heat_capacity.setter
+    def heat_capacity(self, cphc: float):
+
+        if cphc <= 0:
+            raise ValueError("The heat capacity of the system material must be positive.")
+        self._cphc = cphc
 
 
     @property
