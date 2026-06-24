@@ -1091,20 +1091,12 @@ test_solver_a = FiniteDiffSolverAxial(
     gas_temps = gas_temps_a
 )
 
-prev_temps = np.full((r_res_a, x_res_a), 298.15, dtype=np.float64)
-temps_c01 = prev_temps[:, 0:2].transpose()
-emis_data = np.full(r_res_a - 2, 0.21)
+temps_c01 = init_temps_a[:, 0:2]
+emis_data = np.full(5, 0.21, dtype=np.float64)
 
-print(test_solver_a._calc_top_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
-print(test_solver_a._calc_top_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
-print(test_solver_a._calc_bottom_left_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.5e6))
-print(test_solver_a._calc_bottom_right_corner(0.21, 50.0, 2000.0, 298.15, 298.15, 0.0))
-# print(test_solver_a._calc_left_edge(temps_c01, 50.0, 2000.0, emis_data, 500000.0))
+print(test_solver_a._calc_left_edge(temps_c01, 50.0, 2000.0, emis_data, 0.5e6))
 
-temps_rtop2 = init_temps_a[-2:, :] # Top two rows (printed as bottom)
-temps_rtop2[1, 0] = 300
-h_data = np.full(x_res_a-2, 50.0, dtype=np.float64)
-emis_data = np.full_like(h_data, 0.21)
-gas_temps = np.full_like(h_data, 298.15)
-edge_temps = test_solver_a._calc_top_edge(temps_rtop2, h_data, emis_data, gas_temps)
-print(test_solver_a._calc_top_edge(temps_rtop2, h_data, emis_data, gas_temps))
+init_temps_a[-1, 0] = 299.7723833159169
+init_temps_a[-1, -1] = 298.41316287416487
+init_temps_a[0, 0] = 299.71923830845077
+init_temps_a[0, -1] = 298.3950459043153
