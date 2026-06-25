@@ -1,13 +1,16 @@
 from pathlib import Path
+from typing import Any, cast
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as _plt
 from DataHandling import load_init_temps, load_points, load_temp_data
 from matplotlib.animation import FFMpegWriter, FuncAnimation
 from matplotlib.widgets import Slider
 import numpy as np
 
+plt = cast(Any, _plt)
 
-COLORS = ["#500000", "#F15946", "#F9C22E", "#53B3CB", "#E4E50", "#500000", "#F15946", "#F9C22E", "#53B3CB", "#3E4E50"]
+
+COLORS = ["#500000", "#F15946", "#F9C22E", "#53B3CB", "#3E4E50", "#500000", "#F15946", "#F9C22E", "#53B3CB", "#3E4E50"]
 
 
 def time_evolution_plot(csv_path: Path, subject_length: float = 1.0):
@@ -93,9 +96,9 @@ def positions_over_time_plot(csv_path: Path):
     data = load_points(csv_path, [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
     times = data[:, 0]
     temps = data[:, 1:]
-    fig, ax = plt.subplots(figsize=(10, 6))
-    min_times = []
-    min_temps = []
+    _fig, ax = plt.subplots(figsize=(10, 6))
+    min_times: list[float] = []
+    min_temps: list[float] = []
     ax.set_title("Temperature Evolution at Various Positions")
     for i in range(temps.shape[1]):
         curve = temps[:, i]
@@ -107,7 +110,7 @@ def positions_over_time_plot(csv_path: Path):
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Temperature [K]")
     temp_diff = np.max(temps) - np.min(temps)
-    ax.set_xlim(0.0, 25.0)
+    ax.set_xlim(0.0, 0.2)
     ax.set_ylim(np.min(temps) - temp_diff * 0.1, np.max(temps) + temp_diff * 0.1)
     ax.grid(True)
 
@@ -118,7 +121,7 @@ def minimum_curve_plot(csv_path: Path):
 
     positions, min_data = load_temp_data(csv_path)
     min_times = min_data[:, 1]
-    fig, ax = plt.subplots(figsize=(10, 6))
+    _fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_xlabel("Position [m]")
     ax.set_ylabel("Lag Time [s]")
     ax.set_title("Lag Time of Temperature Drop vs Position")
@@ -133,7 +136,7 @@ def linear_regression_plot(csv_path: Path, subject_length: float = 0.100):
     x_positions = np.linspace(0.0, subject_length, temps.shape[0])
     slope, intercept = np.polyfit(x_positions, temps, 1)
     regression_line = slope * x_positions + intercept
-    fig, ax = plt.subplots(figsize=(10, 6))
+    _fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_xlabel('Position [m]')
     ax.set_ylabel('Temperature [K]')
     ax.set_title("Linear Regression of Steady-state Temperature Distribution")
@@ -145,7 +148,7 @@ def linear_regression_plot(csv_path: Path, subject_length: float = 0.100):
 
 
 # positions_over_time_plot(Path("copper_chop.csv"))
-# time_evolution_plot(Path("copper_heating.csv"))
+# time_evolution_plot(Path("copper_steadystate_evolution.csv"))
 # minimum_curve_plot(Path("copper_minimums.csv"))
 # save_evo_video(Path("copper_middle_heating.csv"), Path("copper_middle_heating.mp4"), subject_length=0.010, fps=30, vid_length=10.0, max_sim_time=2000.0)
-linear_regression_plot(Path("copper_middle_steadystate.csv"), subject_length=0.010)
+# linear_regression_plot(Path("copper_middle_steadystate.csv"), subject_length=0.010)

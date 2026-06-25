@@ -9,20 +9,20 @@ from pathlib import Path
 import numpy as np
 
 
-def save_procedure(raw_temp_map, final_temps):
+def save_procedure(raw_temp_map: NDArray[np.float64], final_temps: NDArray[np.float64]):
 
     """
     Perform the save procedure for the simulation data and final temperatures.
 
-    :param NDArray[np.float64] raw_temp_map: The raw temperature data from the simulation.
-    :param NDArray[np.float64] final_temps: The final temperature distribution.
+    :param raw_temp_map: The raw temperature data from the simulation.
+    :param final_temps: The final temperature distribution.
     """
 
     ask_save_data(raw_temp_map)
     ask_save_final_temps(final_temps)
 
 
-def ask_save_data(raw_temp_map):
+def ask_save_data(raw_temp_map: NDArray[np.float64]):
 
     invalid = True
     while invalid:
@@ -37,7 +37,7 @@ def ask_save_data(raw_temp_map):
             print("Invalid input. Please enter 'y' or 'n'.")
 
 
-def ask_save_final_temps(final_temps):
+def ask_save_final_temps(final_temps: NDArray[np.float64]):
 
     invalid = True
     while invalid:
@@ -129,4 +129,4 @@ def save_minimums(temperature_data: NDArray[np.float64], length: float, filename
 
 # test_data = load_points(Path("copper_chop.csv"), [1, 11, 21, 31, 41, 51, 61, 71, 81, 91])
 # print(find_minimums(test_data))
-# save_minimums(np.loadtxt("data/copper_chop.csv", delimiter=','), 0.1, "copper_minimums.csv")
+save_minimums(np.loadtxt("data/copper_chop.csv", delimiter=','), 0.0035, "copper_minimums.csv")

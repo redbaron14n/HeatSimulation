@@ -15,22 +15,13 @@ class ConductiveSystem1D:
 
     def __init__(
             self,
-            peri: float,
-            area: float,
-            cphc: float,
-            dens: float,
             diff: float,
             cond: float,
             emis: NDArray[np.float64],
-            htcs: tuple[float, float],
             length: float,
         ):
 
         """
-        :param float peri: The perimeter of the system [m].
-        :param float area: The cross-sectional area of the system [m^2].
-        :param float cphc: The constant-pressure heat capacity of the material [J/kg/K].
-        :param float dens: The density of the material [kg/m^3].
         :param float diff: The thermal diffusivity of the material [m^2/s].
         :param float cond: The thermal conductivity of the material [W/m/K].
         :param NDArray[np.float64] emis: The emissivities of the material at and above corresponding temperatures. The first column represents the temperatures [K] and the second column represents the emissivities [dimensionless].
@@ -38,92 +29,15 @@ class ConductiveSystem1D:
         :param float length: The length of the system [m].
         """
 
-        self.perimeter = peri
-        self.area = area
-        self.heat_capacity = cphc
-        self.density = dens
         self.diffusivity = diff
         self.conductivity = cond
         self.emissivities = emis
-        self.heat_transfer_coefs = htcs
         self.length = length
 
 
     ########################################
     # Getters and Setters
     ########################################
-
-
-    @property
-    def perimeter(self) -> float:
-
-        """
-        :return: The perimeter of the system [m].
-        """
-
-        return self._peri
-    
-
-    @perimeter.setter
-    def perimeter(self, peri: float):
-
-        if peri <= 0:
-            raise ValueError("Perimeter must be positive.")
-        self._peri = peri
-
-
-    @property
-    def area(self) -> float:
-
-        """
-        :return: The cross-sectional area of the system [m^2].
-        """
-
-        return self._area
-
-
-    @area.setter
-    def area(self, area: float):
-
-        if area <= 0:
-            raise ValueError("Cross-sectional area must be positive.")
-        self._area = area
-
-
-    @property
-    def heat_capacity(self) -> float:
-
-        """
-        :return: The constant-pressure heat capacity of the material [J/kg/K].
-        """
-
-        return self._cphc
-    
-
-    @heat_capacity.setter
-    def heat_capacity(self, cphc: float):
-
-        if cphc <= 0:
-            raise ValueError("Heat capacity must be positive.")
-        self._cphc = cphc
-
-
-    @property
-    def density(self) -> float:
-
-        """
-        :return: The density of the material [kg/m^3].
-        """
-
-        return self._dens
-    
-
-    @density.setter
-    def density(self, dens: float):
-
-        if dens <= 0:
-            raise ValueError("Density must be positive.")
-        self._dens = dens
 
 
     @property
@@ -183,25 +97,6 @@ class ConductiveSystem1D:
             raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
         self._emis_time_points = emis[:, 0]
         self._emis = emis
-
-
-    @property
-    def heat_transfer_coefs(self) -> tuple[float, float]:
-
-        """
-        :return: The heat transfer coefficients at the boundaries [W/m^2/K].
-        """
-
-        return self._htcs
-
-
-    @heat_transfer_coefs.setter
-    def heat_transfer_coefs(self, htcs: tuple[float, float]):
-
-        for h in htcs:
-            if h < 0:
-                raise ValueError("Each heat transfer coefficient must be non-negative.")
-        self._htcs = htcs
 
 
     @property
