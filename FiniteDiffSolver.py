@@ -631,6 +631,7 @@ class FiniteDiffSolverAxial:
         self._x_res = points
         self._update_x_step()
         self._update_cutoff_index()
+        self._update_r_map_wide()
 
 
     @property
@@ -775,6 +776,7 @@ class FiniteDiffSolverAxial:
         self._r_step = self._system.radius / (self._r_res - 1)
         self._r_map = np.linspace(0, self._system.radius, self._r_res)
         self._update_t_step()
+        self._update_r_map_wide()
 
 
     def _update_t_step(self):
@@ -783,6 +785,14 @@ class FiniteDiffSolverAxial:
             return
         self._t_step = self._diff_num / (self._system.diffusivity * (self._x_step**(-2) + 2*self._r_step**(-2)))
         self._volcp = self._system.density * self._system.heat_capacity / self._t_step # Used constantly in edge and internal temp calculations
+
+
+    def _update_r_map_wide(self):
+
+        if not hasattr(self, "_r_map"):
+            return
+        r_map_interior = self._r_map[1:-1]
+        self._r_map_wide = np.repeat(r_map_interior[:, np.newaxis], self._x_res-2, axis=1) # Used in interior node calculations
 
 
     def _update_tick_count(self):
@@ -1125,6 +1135,32 @@ class FiniteDiffSolverAxial:
         
         edge_temps = numerator / denominator
         return edge_temps
+    
+
+    def _calc_internal_temps(self, prev_temps: NDArray[np.float64]) -> NDArray[np.float64]:
+
+        """
+        Calculates the temperatures for the interior nodes.
+
+        :param prev_temps: The entire temperature array at the previous time-step.
+        """
+
+        temps_b = prev_temps[1:-1, 1:-1]
+        temps_g = prev_temps[1:-1, :-2]
+        temps_h = prev_temps[1:-1, 2:]
+        temps_alpha = prev_temps[:-2, 1:-1]
+        temps_beta = prev_temps[2:, 1:-1]
+
+        k = self._system.conductivity
+
+        numerator = (k * (temps_h + temps_g) / (self._x_step**2)
+                     + k * (temps_alpha + temps_beta) / (self._r_step**2)
+                     + (temps_beta - temps_alpha) / (2 * self._r_map_wide * self._r_step)
+                     + self._volcp * temps_b)
+        denominator = 2 * k * (self._x_step**(-2) + self._r_step**(-2)) + self._volcp
+
+        interior_temps = numerator / denominator
+        return interior_temps
 
 
 emis_a = np.array([[298.15, 0.21], [383.15, 0.33]])
@@ -1155,3 +1191,5 @@ test_solver_a = FiniteDiffSolverAxial(
     torch_fluxs = torch_fluxs_a,
     gas_temps = gas_temps_a
 )
+
+print(test_solver_a._calc_internal_temps(init_temps_a))

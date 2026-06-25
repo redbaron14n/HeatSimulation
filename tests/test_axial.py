@@ -93,3 +93,10 @@ def test_bottom_edge_calculator():
     edge_temps = test_solver_a._calc_bottom_edge(middle_temps)
     expected = np.full(8, 298.15, dtype=np.float64)
     np.testing.assert_allclose(edge_temps, expected, rtol=0.0, atol=1e-8)
+
+
+def test_internal_calculator():
+
+    interior_temps = test_solver_a._calc_internal_temps(init_temps_a)
+    expected = np.full((5, 8), 298.15, dtype=np.float64)
+    np.testing.assert_allclose(interior_temps, expected, rtol=0.0, atol=1e-8)
