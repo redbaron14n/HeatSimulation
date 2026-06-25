@@ -757,8 +757,8 @@ class FiniteDiffSolverAxial:
 
     def _validate_init_temps(self):
 
-        if self._init_temps.shape != (self._x_res, self._r_res):
-            raise ValueError(f"Initial temperatures must be a 2D array with shape ({self._x_res}, {self._r_res}).")
+        if self._init_temps.shape != (self._r_res, self._x_res):
+            raise ValueError(f"Initial temperatures must be a 2D array with shape ({self._r_res}, {self._x_res}).")
         
 
     def _update_x_step(self):
@@ -1161,6 +1161,38 @@ class FiniteDiffSolverAxial:
 
         interior_temps = numerator / denominator
         return interior_temps
+
+
+    ########################################
+    # Public Methods
+    ########################################
+
+
+    def calc_steady_state(self, print_every: int = 10000) -> NDArray[np.float64]:
+
+        """
+        Calculates the steady-state temperature distribution of the defined system and conditions.
+
+        :param print_every: How often, in ticks, to print residual updates. 0 to disable. 10000 by default.
+        """
+
+        self._validate_init_temps()
+        temps = self._init_temps
+        saved_times: list[float] = [0.0]
+        saved_dists: list[NDArray[np.float64]] = [temps]
+        times = np.arange(0, self._max_time + self._t_step, self._t_step)
+        fluxs, gasses, emis_lookup = self._build_lookup_tables(times)
+        converged = False
+        tick = 0
+        while (not converged) and (tick < self._tick_count):
+            tick += 1
+            new_temps = temps.copy()
+            corner_temps = set_corners()
+            edge_temps = set_edges()
+            etc...
+
+
+
 
 
 emis_a = np.array([[298.15, 0.21], [383.15, 0.33]])
