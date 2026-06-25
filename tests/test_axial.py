@@ -57,24 +57,39 @@ def test_bottom_right_corner_calculator():
     assert m.isclose(temp, 298.3950459043153)
 
 
+h_data = np.full(x_res_a-2, 50.0, dtype=np.float64)
+gas_temps_data = np.full_like(h_data, 2000.0)
+side_emis_data = np.full(5, 0.21, dtype=np.float64)
+
+
 def test_left_edge_calculator():
 
-    pass
+    temps_c01 = init_temps_a[:, 0:2]
+    edge_temps = test_solver_a._calc_left_edge(temps_c01, 50.0, side_emis_data, 2000.0, 0.5e6)
+    expected = np.full(5, 298.33728797, dtype=np.float64)
+    np.testing.assert_allclose(edge_temps, expected, rtol=0.0, atol=1e-8)
 
 
 def test_top_edge_calculator():
 
-    temps_rtop2 = init_temps_a[-2:, :] # Top two rows (printed as bottom)
-    temps_rtop2[1, 0] = 300
-    h_data = np.full(x_res_a-2, 50.0, dtype=np.float64)
-    emis_data = np.full_like(h_data, 0.21)
-    gas_temps = np.full_like(h_data, 298.15)
-    edge_temps = test_solver_a._calc_top_edge(temps_rtop2, h_data, emis_data, gas_temps)
-    expected = np.array([298.25659472, 298.15, 298.15, 298.15, 298.15, 298.15, 298.15, 298.16516312]) # These are wrong - need to be generated using array of only 298.15 values, not with updated corners
+    temps_rtop2 = init_temps_a[-2:, :] # Top two rows (numpy prints upside-down)
+    top_emis_data = np.full_like(h_data, 0.21)
+    edge_temps = test_solver_a._calc_top_edge(temps_rtop2, h_data, top_emis_data, gas_temps_data)
+    expected = np.full(8, 298.15393445, dtype=np.float64)
     np.testing.assert_allclose(edge_temps, expected, rtol=0.0, atol=1e-8)
 
 
-init_temps_a[-1, 0] = 299.7723833159169
-init_temps_a[-1, -1] = 298.41316287416487
-init_temps_a[0, 0] = 299.71923830845077
-init_temps_a[0, -1] = 298.3950459043153
+def test_right_edge_calculator():
+
+    temps_ctop2 = init_temps_a[:, -2:]
+    edge_temps = test_solver_a._calc_right_edge(temps_ctop2, 50.0, side_emis_data, 2000.0, 0.0)
+    expected = np.full(5, 298.17723809, dtype=np.float64)
+    np.testing.assert_allclose(edge_temps, expected, rtol=0.0, atol=1e-8)
+
+
+def test_bottom_edge_calculator():
+
+    middle_temps = init_temps_a[:2, :]
+    edge_temps = test_solver_a._calc_bottom_edge(middle_temps)
+    expected = np.full(8, 298.15, dtype=np.float64)
+    np.testing.assert_allclose(edge_temps, expected, rtol=0.0, atol=1e-8)
