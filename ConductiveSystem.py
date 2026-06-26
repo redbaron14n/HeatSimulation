@@ -95,7 +95,6 @@ class ConductiveSystem1D:
             raise ValueError("Each temperature must be positive.")
         if not (np.all(emis[:, 1] >= 0) and np.all(emis[:, 1] <= 1)):
             raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
-        self._emis_time_points = emis[:, 0]
         self._emis = emis
 
 
@@ -129,7 +128,6 @@ class ConductiveSystemAxial:
             diff: float,
             cond: float,
             emis: NDArray[np.float64],
-            htcs: tuple[float, float],
             dens: float,
             cphc: float,
             length: float,
@@ -140,7 +138,6 @@ class ConductiveSystemAxial:
         :param diff: The thermal diffusivity of the material [m^2/s].
         :param cond: The thermal conductivity of the material [W/m/K].
         :param emis: The emissivities of the material at and above corresponding temperatures. The first column represents the temperatures [K] and the second column represents the emissivities [dimensionless].
-        :param htcs: The heat transfer coefficients at the boundaries [W/m^2/K].
         :param dens: The density of the system material [kg/m^3].
         :param cphc: The constant-pressure heat capacity of the system material [J/kg/K].
         :param length: The length of the system [m].
@@ -150,7 +147,6 @@ class ConductiveSystemAxial:
         self.diffusivity = diff
         self.conductivity = cond
         self.emissivities = emis
-        self.heat_transfer_coefs = htcs
         self.density = dens
         self.heat_capacity = cphc
         self.length = length
@@ -217,27 +213,7 @@ class ConductiveSystemAxial:
             raise ValueError("Each temperature must be positive.")
         if not (np.all(emis[:, 1] >= 0) and np.all(emis[:, 1] <= 1)):
             raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
-        self._emis_time_points = emis[:, 0]
         self._emis = emis
-
-
-    @property
-    def heat_transfer_coefs(self) -> tuple[float, float]:
-
-        """
-        :return: The heat transfer coefficients at the boundaries [W/m^2/K].
-        """
-
-        return self._htcs
-    
-
-    @heat_transfer_coefs.setter
-    def heat_transfer_coefs(self, htcs: tuple[float, float]):
-
-        for h in htcs:
-            if h < 0:
-                raise ValueError("Each heat transfer coefficient must be non-negative.")
-        self._htcs = htcs
 
 
     @property
