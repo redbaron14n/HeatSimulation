@@ -11,6 +11,8 @@ from numpy.typing import NDArray
 from pathlib import Path
 from typing import NamedTuple
 
+np.set_printoptions(linewidth=200, threshold=50)
+
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
 MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
 
@@ -810,26 +812,6 @@ class FiniteDiffSolverAxial:
         return positive_real_roots[0]
     
 
-    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], tick: int, print_every: int, conv_tol: float) -> bool:
-
-        """
-        Determines if the simulation converged after completing another tick by computing the sum of the squares of the difference between the cells. Also prints update statements.
-
-        :param T_new: The newest 2D array of temperatures.
-        :param T_old: The 2D array of temperatures from last tick.
-        :param tick: The current calculation iteration.
-        :param print_every: How many ticks should pass before printing another update.
-        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance.
-        :return: True if converged, False otherwise.
-        """
-
-        sum_square = ((T_new - T_old)**2).sum()
-        if print_every > 0 and tick % print_every == 0:
-            print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        finished = (sum_square <= conv_tol) and (tick * self._t_step >= self._min_time)
-        return finished
-    
-
     def _build_lookup_tables(self, times: NDArray[np.float64]) -> LookupTables:
 
         """
@@ -1150,6 +1132,7 @@ class FiniteDiffSolverAxial:
         :param emis_lookup: The temp-to-emissivity lookup table.
         :param htcs_tuple: The heat transfer coefs on either side.
         :param gas_temp_tuple: The gas temps on either side.
+        :return: A tuple containing the new top-left, bottom-left, top-right, and bottom-right temperatures.
         """
 
         tl_emis: float = emis_lookup[int(temps[-1, 0])]
@@ -1187,13 +1170,12 @@ class FiniteDiffSolverAxial:
         :param emis_lookup: The temp-to-emissivity lookup table.
         :param htcs_tuple: The heat transfer coefs on either side.
         :param gas_temp_tuple: The gas temps on either side.
+        :return: A tuple containing the new left, top, right, and bottom edge temperature distributions.
         """
 
         l_emis = emis_lookup[temps[1:-1, 0].astype(int)]
         temps_c01 = temps[:, 0:2]
-        l_h: float = htcs_tuple[0]
-        l_gas_temp: float = gas_temp_tuple[0]
-        left = self._calc_left_edge(temps_c01, l_h, l_emis, l_gas_temp)
+        left = self._calc_left_edge(temps_c01, htcs_tuple[0], l_emis, gas_temp_tuple[0])
 
         t_emis = emis_lookup[temps[-1, 1:-1].astype(int)]
         temps_rtop2 = temps[-2:, :]
@@ -1204,7 +1186,43 @@ class FiniteDiffSolverAxial:
 
         r_emis = emis_lookup[temps[1:-1, -1].astype(int)]
         temps_ctop2 = temps[:, -2:]
-        r_h: float = htcs_tuple[1]
+        right = self._calc_right_edge(temps_ctop2, htcs_tuple[1], r_emis, gas_temp_tuple[1])
+
+        temps_r01 = temps[0:2, :]
+        bottom = self._calc_bottom_edge(temps_r01)
+
+        return left, top, right, bottom
+    
+
+    def _check_convergence(self, new_temps: NDArray[np.float64], old_temps: NDArray[np.float64], conv_tol: float, sim_time: float) -> tuple[bool, float]:
+    
+        ssd = ((new_temps - old_temps)**2).sum()
+        finished = (ssd <= conv_tol) and (sim_time >= self._min_time)
+        return finished, ssd
+    
+
+    def _print_update(self, temps: NDArray[np.float64], tick: int, time: float, ssd: float, print_every: int):
+
+        if (print_every > 0) and (tick % print_every == 0):
+            print(f"Tick {tick}, T+{time:.3f}s, SSD: {ssd:.3e}\n{temps}")
+
+
+    def _print_summary(self, tick: int, saved: int, converged: bool):
+
+        if converged:
+            print(f"Simulation converged in {tick} ticks with {saved} saved data points.")
+        else:
+            print(f"Simulation reached maximum simulation time without convergence with {saved} saved data points.")
+
+
+    def _validate_inputs(self, conv_tol: float, print_every: int, save_tol: float):
+
+        if conv_tol <= 0:
+            raise ValueError("Parameter 'conv_tol' must be a positive number.")
+        if print_every < 0:
+            raise ValueError("Parameter 'print_every' must be a non-negative integer.")
+        if save_tol <= conv_tol:
+            raise ValueError("Parameter 'save_tol' must be greater than 'conv_tol'.")
 
 
     ########################################
@@ -1212,19 +1230,23 @@ class FiniteDiffSolverAxial:
     ########################################
 
 
-    def calc_steady_state(self, conv_tol: float = 1e-6, print_every: int = 10000, save_tol: float = 1e-3) -> NDArray[np.float64]:
+    def calc_steady_state(self, conv_tol: float = 1e-6, print_every: int = 10000, save_tol: float = 1e-3):
 
         """
         Calculates the steady-state temperature distribution of the defined system and conditions.
 
+        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance. Default is 1e-6.
         :param print_every: How often, in ticks, to print residual updates. 0 to disable. 10000 by default.
+        :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
         """
 
-        # self._validate_inputs(conv_tol, print_every, save_tol)
+        self._validate_inputs(conv_tol, print_every, save_tol)
         self._validate_init_temps()
         temps = self._init_temps
         saved_times: list[float] = [0.0]
-        saved_dists: list[NDArray[np.float64]] = [temps]
+        saved_temps: list[NDArray[np.float64]] = [temps]
+        last_saved = temps
+        saved = 1
         times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         converged = False
@@ -1237,38 +1259,51 @@ class FiniteDiffSolverAxial:
             gas_temp_tuple: tuple[float, float] = gasses[0][tick], gasses[1][tick]
             corner_temps = self._calc_corner_temps(temps, emis_lookup, htcs_tuple, gas_temp_tuple)
             new_temps[-1, 0], new_temps[0, 0], new_temps[-1, -1], new_temps[0, -1] = corner_temps
-            print(new_temps)
             edge_temps = self._calc_edge_temps(temps, emis_lookup, htcs_tuple, gas_temp_tuple)
-            break
+            new_temps[1:-1, 0], new_temps[0, 1:-1], new_temps[1:-1, -1], new_temps[-1, 1:-1] = edge_temps
+            new_temps[1:-1, 1:-1] = self._calc_internal_temps(temps)
+            converged, ssd = self._check_convergence(new_temps, temps, conv_tol, time)
+            self._print_update(temps, tick, time, ssd, print_every)
+            if (((new_temps - last_saved)**2).sum() >= save_tol) or converged:
+                saved_times.append(time)
+                saved_temps.append(new_temps)
+                last_saved = new_temps
+                saved += 1
+            temps = new_temps
+        self._final_temps = temps
+        self._saved_times_map = np.array(saved_times)
+        self._saved_temps_map = np.array(saved_temps)
+        self._print_summary(tick, saved, converged)
 
 
 
 
 
-emis_a = np.array([[298.15, 0.21], [383.15, 0.33]])
-htcs_a = (50.0, 50.0)
+emis_a = np.array([[298.15, 0.5]])
 
 test_system_a = ConductiveSystemAxial(
     diff = 1.58e-4,
-    cond = 400.0,
+    cond = 40.0,
     emis = emis_a,
     dens = 8960.0,
     cphc = 418.0,
-    length = 0.01,
+    length = 0.0035,
     radius = 0.05
 )
 
 x_res_a = 10
-r_res_a = 7
+r_res_a = 50
 init_temps_a = np.full((r_res_a, x_res_a), 298.15)
-gas_temps_a = np.array([[0.0, 2000.0, 298.15]])
+gas_temps_a = np.array([[0.0, 2500.0, 298.15]])
+htcs = np.array([[0.0, 316.227766, 100.]], dtype=np.float64)
 
 test_solver_a = FiniteDiffSolverAxial(
-    system = test_system_a,
-    x_res = x_res_a,
-    r_res = r_res_a,
-    initial_temps = init_temps_a,
-    gas_temps = gas_temps_a
+    test_system_a,
+    init_temps_a,
+    gas_temps_a,
+    htcs,
+    x_res=x_res_a,
+    r_res=r_res_a
 )
 
 test_solver_a.calc_steady_state()
