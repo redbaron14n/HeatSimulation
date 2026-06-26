@@ -6,9 +6,9 @@
 
 import numpy as np
 from ConductiveSystem import ConductiveSystem1D, ConductiveSystemAxial
-from DataHandling import load_init_temps, save_procedure
+from DataHandling import save_procedure
 from numpy.typing import NDArray
-from pathlib import Path
+from scipy.optimize import newton
 from typing import NamedTuple
 
 np.set_printoptions(linewidth=200, threshold=50)
@@ -350,7 +350,7 @@ class FiniteDiffSolver1D:
         sum_square = ((T_new - T_old) ** 2).sum()
         if print_every > 0 and tick % print_every == 0:
             print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        finished = (sum_square <= conv_tol) and (tick * self._t_step >= self._min_time)
+        finished = (float(sum_square) <= conv_tol) and (tick * self._t_step >= self._min_time)
         return finished
 
 
@@ -794,24 +794,6 @@ class FiniteDiffSolverAxial:
         self._cutoff_index = round(self._env_cutoff * (self._x_res - 1))
 
 
-    def _select_root(self, roots: NDArray[np.complexfloating] | NDArray[np.floating]) -> float:
-
-        """
-        Selects the appropriate root from the quartic equation based on physical constraints (real and positive).
-
-        :param roots: The array of roots from the quartic equation.
-        :return: The selected root that represents the boundary temperature [K].
-        """
-
-        real_roots = roots[abs(roots.imag) < 1e-10].real
-        positive_real_roots = real_roots[real_roots > 0]
-        if len(positive_real_roots) == 0:
-            raise ValueError("No valid positive real roots found for boundary temperature.")
-        if len(positive_real_roots) > 1:
-            raise ValueError("Multiple positive real roots found for boundary temperature; unable to select unique solution.")
-        return positive_real_roots[0]
-    
-
     def _build_lookup_tables(self, times: NDArray[np.float64]) -> LookupTables:
 
         """
@@ -838,11 +820,22 @@ class FiniteDiffSolverAxial:
         return LookupTables(gasses_lookup, htcs_lookup, emis_lookup)
     
 
-    def _calc_top_left_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
+    def _quartic(self, x: float, c4: float, c1: float, c0: float) -> float:
+
+        return c4*x**4 + c1*x + c0
+    
+
+    def _quartic_slope(self, x: float, c4: float, c1: float, c0: float) -> float:
+
+        return 4*c4*x**3 + c1
+
+
+    def _calc_top_left_corner(self, past_temp: float, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
 
         """
         Solves for the temperature [K] subject to both the left face and radial out boundary conditions using a weighted face-area method. Ax*(Ta - T)/dx + Ar*(T - Tb) = dr*Tx + dx*Tr
 
+        :param past_temp: The temperature [K] of the corner node at the previous time-step.
         :param emis: The emissivity of the material at its temperature.
         :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
         :param temp_gas: The temperature of the gas outside this point [K].
@@ -863,15 +856,16 @@ class FiniteDiffSolverAxial:
         a03 = k * self._x_step**2 * temp_b
         a0 = -a00 - a01 - a02 + a03
 
-        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        temp_corner: float = newton(self._quartic, past_temp, self._quartic_slope, args=(a4, a1, a0))
         return temp_corner
     
 
-    def _calc_top_right_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
+    def _calc_top_right_corner(self, past_temp: float, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
 
         """
         Solves for the temperature [K] subject to both the right face and radial out boundary conditions using a weighted face-area method. Largely the same as the top-left corner but with a few sign changes. Ax*(T - Ta)/dx + Ar*(T - Tb) = dr*Tx + dx*Tr
 
+        :param past_temp: The temperature [K] of the corner node at the previous time-step.
         :param emis: The emissivity of the material at its temperature.
         :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
         :param temp_gas: The temperature of the gas outside this point [K].
@@ -892,15 +886,16 @@ class FiniteDiffSolverAxial:
         a03 = k * self._x_step**2 * temp_b
         a0 = a00 + a01 + a02 + a03
 
-        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        temp_corner: float = newton(self._quartic, past_temp, self._quartic_slope, args=(a4, a1, a0))
         return temp_corner
     
 
-    def _calc_bottom_left_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
+    def _calc_bottom_left_corner(self, past_temp: float, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
 
         """
         Solves for the temperature [K] subject to both the left face and inner zero slope symmetry boundary conditions using a weighted face-area method. Ax*(Ta - T)/dx + Ar*(Tb - T) = dr*Tx
 
+        :param past_temp: The temperature [K] of the corner node at the previous time-step.
         :param emis: The emissivity of the material at its temperature.
         :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
         :param temp_gas: The temperature of the gas outside this point [K].
@@ -921,15 +916,16 @@ class FiniteDiffSolverAxial:
         a03 = 2 * k * self._x_step**2 * temp_b
         a0 = -a00 - a01 - a02 - a03
 
-        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        temp_corner: float = newton(self._quartic, past_temp, self._quartic_slope, args=(a4, a1, a0))
         return temp_corner
     
 
-    def _calc_bottom_right_corner(self, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
+    def _calc_bottom_right_corner(self, past_temp: float, emis: float, h: float, temp_gas: float, temp_a: float, temp_b: float) -> float:
 
         """
         Solves for the temperature [K] subject to both the right face and inner zero slope symmetry boundary conditions using a weighted face-area method. Largely the same as the bottom-left corner but with a few sign changes. Ax*(T - Ta)/dx + Ar*(Tb - T) = dr*Tx
 
+        :param past_temp: The temperature [K] of the corner node at the previous time-step.
         :param emis: The emissivity of the material at its temperature.
         :param h: The heat transfer coefficient between the material and exterior gas at this point [W/m^2/K].
         :param temp_gas: The temperature of the gas outside this point [K].
@@ -950,7 +946,7 @@ class FiniteDiffSolverAxial:
         a03 = 2 * k * self._x_step**2 * temp_b
         a0 = a00 + a01 + a02 - a03
 
-        temp_corner = self._select_root(np.roots([a4, 0, 0, a1, a0]))
+        temp_corner: float = newton(self._quartic, past_temp, self._quartic_slope, args=(a4, a1, a0))
         return temp_corner
     
 
@@ -990,7 +986,7 @@ class FiniteDiffSolverAxial:
 
         edge_temps = np.zeros_like(temps_b)
         for i, (c4, c0) in enumerate(zip(a4, a0)):
-            edge_temps[i] = self._select_root(np.roots([c4, 0, 0, c1, c0]))
+            edge_temps[i] = newton(self._quartic, temps_b[i], self._quartic_slope, args=(c4, c1, c0))
         return edge_temps
     
 
@@ -1028,7 +1024,7 @@ class FiniteDiffSolverAxial:
         
         edge_temps = np.zeros_like(temps_b)
         for i, (c4, c1, c0) in enumerate(zip(a4, a1, a0)):
-            edge_temps[i] = self._select_root(np.roots([c4, 0, 0, c1, c0]))
+            edge_temps[i] = newton(self._quartic, temps_b[i], self._quartic_slope, args=(c4, c1, c0))
         return edge_temps
     
 
@@ -1068,7 +1064,7 @@ class FiniteDiffSolverAxial:
 
         edge_temps = np.zeros_like(temps_b)
         for i, (c4, c0) in enumerate(zip(a4, a0)):
-            edge_temps[i] = self._select_root(np.roots([c4, 0, 0, c1, c0]))
+            edge_temps[i] = newton(self._quartic, temps_b[i], self._quartic_slope, args=(c4, c1, c0))
         return edge_temps
     
 
@@ -1135,29 +1131,33 @@ class FiniteDiffSolverAxial:
         :return: A tuple containing the new top-left, bottom-left, top-right, and bottom-right temperatures.
         """
 
+        tl_past: float = temps[-1, 0]
         tl_emis: float = emis_lookup[int(temps[-1, 0])]
         l_h: float = htcs_tuple[0]
         l_gas_temp: float = gas_temp_float[0]
         tl_temp_a: float = temps[-1, 1]
         tl_temp_b: float = temps[-2, 0]
-        tl = self._calc_top_left_corner(tl_emis, l_h, l_gas_temp, tl_temp_a, tl_temp_b)
+        tl = self._calc_top_left_corner(tl_past, tl_emis, l_h, l_gas_temp, tl_temp_a, tl_temp_b)
 
+        bl_past: float = temps[0, 0]
         bl_emis: float = emis_lookup[int(temps[0, 0])]
         bl_temp_a: float = temps[0, 1]
         bl_temp_b: float = temps[1, 0]
-        bl = self._calc_bottom_left_corner(bl_emis, l_h, l_gas_temp, bl_temp_a, bl_temp_b)
+        bl = self._calc_bottom_left_corner(bl_past, bl_emis, l_h, l_gas_temp, bl_temp_a, bl_temp_b)
 
+        tr_past: float = temps[-1, -1]
         tr_emis: float = emis_lookup[int(temps[-1, -1])]
         r_h: float = htcs_tuple[1]
         r_gas_temp: float = gas_temp_float[1]
         tr_temp_a: float = temps[-1, -2]
         tr_temp_b: float = temps[-2, -1]
-        tr = self._calc_top_right_corner(tr_emis, r_h, r_gas_temp, tr_temp_a, tr_temp_b)
+        tr = self._calc_top_right_corner(tr_past, tr_emis, r_h, r_gas_temp, tr_temp_a, tr_temp_b)
 
+        br_past: float = temps[0, -1]
         br_emis: float = emis_lookup[int(temps[0, -1])]
         br_temp_a: float = temps[0, -2]
         br_temp_b: float = temps[1, -1]
-        br = self._calc_bottom_right_corner(br_emis, r_h, r_gas_temp, br_temp_a, br_temp_b)
+        br = self._calc_bottom_right_corner(br_past, br_emis, r_h, r_gas_temp, br_temp_a, br_temp_b)
 
         return tl, bl, tr, br
     
@@ -1292,7 +1292,7 @@ test_system_a = ConductiveSystemAxial(
     radius = 0.05
 )
 
-x_res_a = 10
+x_res_a = 35
 r_res_a = 50
 init_temps_a = np.full((r_res_a, x_res_a), 298.15)
 gas_temps_a = np.array([[0.0, 2500.0, 298.15]])
@@ -1307,4 +1307,4 @@ test_solver_a = FiniteDiffSolverAxial(
     r_res=r_res_a
 )
 
-test_solver_a.calc_steady_state()
+test_solver_a.calc_steady_state(print_every=10000)
