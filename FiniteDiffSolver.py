@@ -1142,19 +1142,19 @@ class FiniteDiffSolverAxial:
         return interior_temps
 
 
-    def _calc_corner_temps(self, tick: int, temps: NDArray[np.float64], emis_lookup: NDArray[np.float64], htcs_lookup: tuple[NDArray[np.float64], NDArray[np.float64]], gas_temp_lookup: tuple[NDArray[np.float64], NDArray[np.float64]]) -> tuple[float, float, float, float]:
+    def _calc_corner_temps(self, temps: NDArray[np.float64], emis_lookup: NDArray[np.float64], htcs_tuple: tuple[float, float], gas_temp_float: tuple[float, float]) -> tuple[float, float, float, float]:
 
         """
         :param tick: The current iteration tick for indexing.
         :param temps: The previous iteration of temperatures.
         :param emis_lookup: The temp-to-emissivity lookup table.
-        :param htcs_lookup: The time-to-htc lookup table.
-        :param gas_temp_lookup: The time-to-gas-temp lookup table.
+        :param htcs_tuple: The heat transfer coefs on either side.
+        :param gas_temp_tuple: The gas temps on either side.
         """
 
         tl_emis: float = emis_lookup[int(temps[-1, 0])]
-        l_h: float = htcs_lookup[0][tick]
-        l_gas_temp: float = gas_temp_lookup[0][tick]
+        l_h: float = htcs_tuple[0]
+        l_gas_temp: float = gas_temp_float[0]
         tl_temp_a: float = temps[-1, 1]
         tl_temp_b: float = temps[-2, 0]
         tl = self._calc_top_left_corner(tl_emis, l_h, l_gas_temp, tl_temp_a, tl_temp_b)
@@ -1165,8 +1165,8 @@ class FiniteDiffSolverAxial:
         bl = self._calc_bottom_left_corner(bl_emis, l_h, l_gas_temp, bl_temp_a, bl_temp_b)
 
         tr_emis: float = emis_lookup[int(temps[-1, -1])]
-        r_h: float = htcs_lookup[1][tick]
-        r_gas_temp: float = gas_temp_lookup[1][tick]
+        r_h: float = htcs_tuple[1]
+        r_gas_temp: float = gas_temp_float[1]
         tr_temp_a: float = temps[-1, -2]
         tr_temp_b: float = temps[-2, -1]
         tr = self._calc_top_right_corner(tr_emis, r_h, r_gas_temp, tr_temp_a, tr_temp_b)
@@ -1177,6 +1177,34 @@ class FiniteDiffSolverAxial:
         br = self._calc_bottom_right_corner(br_emis, r_h, r_gas_temp, br_temp_a, br_temp_b)
 
         return tl, bl, tr, br
+    
+
+    def _calc_edge_temps(self, temps: NDArray[np.float64], emis_lookup: NDArray[np.float64], htcs_tuple: tuple[float, float], gas_temp_tuple: tuple[float, float]) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+
+        """
+        :param tick: The current iteration tick for indexing.
+        :param temps: The previous iteration of temperatures.
+        :param emis_lookup: The temp-to-emissivity lookup table.
+        :param htcs_tuple: The heat transfer coefs on either side.
+        :param gas_temp_tuple: The gas temps on either side.
+        """
+
+        l_emis = emis_lookup[temps[1:-1, 0].astype(int)]
+        temps_c01 = temps[:, 0:2]
+        l_h: float = htcs_tuple[0]
+        l_gas_temp: float = gas_temp_tuple[0]
+        left = self._calc_left_edge(temps_c01, l_h, l_emis, l_gas_temp)
+
+        t_emis = emis_lookup[temps[-1, 1:-1].astype(int)]
+        temps_rtop2 = temps[-2:, :]
+        side_mask = np.arange(1, self._x_res-1) <= self._cutoff_index
+        t_h = np.where(side_mask, htcs_tuple[0], htcs_tuple[1]) # Assigns appropriate htcs along the edge
+        t_gas_temps = np.where(side_mask, gas_temp_tuple[0], gas_temp_tuple[1])
+        top = self._calc_top_edge(temps_rtop2, t_h, t_emis, t_gas_temps)
+
+        r_emis = emis_lookup[temps[1:-1, -1].astype(int)]
+        temps_ctop2 = temps[:, -2:]
+        r_h: float = htcs_tuple[1]
 
 
     ########################################
@@ -1205,10 +1233,12 @@ class FiniteDiffSolverAxial:
             tick += 1
             time: float = times[tick]
             new_temps = temps.copy()
-            corner_temps = self._calc_corner_temps(tick, temps, emis_lookup, htcs, gasses)
+            htcs_tuple: tuple[float, float] = htcs[0][tick], htcs[1][tick]
+            gas_temp_tuple: tuple[float, float] = gasses[0][tick], gasses[1][tick]
+            corner_temps = self._calc_corner_temps(temps, emis_lookup, htcs_tuple, gas_temp_tuple)
             new_temps[-1, 0], new_temps[0, 0], new_temps[-1, -1], new_temps[0, -1] = corner_temps
             print(new_temps)
-            edge_temps = self._calc_edge_temps(tick, temps, emis_lookup, htcs, gasses)
+            edge_temps = self._calc_edge_temps(temps, emis_lookup, htcs_tuple, gas_temp_tuple)
             break
 
 
