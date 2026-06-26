@@ -1196,15 +1196,15 @@ class FiniteDiffSolverAxial:
 
     def _check_convergence(self, new_temps: NDArray[np.float64], old_temps: NDArray[np.float64], conv_tol: float, sim_time: float) -> tuple[bool, float]:
     
-        ssd = ((new_temps - old_temps)**2).sum()
-        finished = (ssd <= conv_tol) and (sim_time >= self._min_time)
-        return finished, ssd
+        rms = np.sqrt(((new_temps - old_temps)**2).sum() / (self._x_res * self._r_res))
+        finished = (rms <= conv_tol) and (sim_time >= self._min_time)
+        return finished, rms
     
 
-    def _print_update(self, temps: NDArray[np.float64], tick: int, time: float, ssd: float, print_every: int):
+    def _print_update(self, temps: NDArray[np.float64], tick: int, time: float, rms: float, print_every: int):
 
         if (print_every > 0) and (tick % print_every == 0):
-            print(f"Tick {tick}, T+{time:.3f}s, SSD: {ssd:.3e}\n{temps}")
+            print(f"Tick {tick}, T+{time:.3f}s, RMS: {rms:.3e}\n{temps}")
 
 
     def _print_summary(self, tick: int, saved: int, converged: bool):
@@ -1230,14 +1230,14 @@ class FiniteDiffSolverAxial:
     ########################################
 
 
-    def calc_steady_state(self, conv_tol: float = 1e-6, print_every: int = 10000, save_tol: float = 1e-3):
+    def calc_steady_state(self, conv_tol: float = 1e-6, print_every: int = 10000, save_tol: float = 5e-3):
 
         """
         Calculates the steady-state temperature distribution of the defined system and conditions.
 
-        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance. Default is 1e-6.
+        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the root-mean-square of the differences between iterations falls to or below this tolerance. Default is 1e-6.
         :param print_every: How often, in ticks, to print residual updates. 0 to disable. 10000 by default.
-        :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
+        :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 5e-3.
         """
 
         self._validate_inputs(conv_tol, print_every, save_tol)
@@ -1264,7 +1264,8 @@ class FiniteDiffSolverAxial:
             new_temps[1:-1, 1:-1] = self._calc_internal_temps(temps)
             converged, ssd = self._check_convergence(new_temps, temps, conv_tol, time)
             self._print_update(temps, tick, time, ssd, print_every)
-            if (((new_temps - last_saved)**2).sum() >= save_tol) or converged:
+            rms_last = np.sqrt(((new_temps - last_saved)**2).sum() / (self._x_res * self._r_res))
+            if (rms_last >= save_tol) or converged:
                 saved_times.append(time)
                 saved_temps.append(new_temps)
                 last_saved = new_temps
