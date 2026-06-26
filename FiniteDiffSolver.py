@@ -442,26 +442,26 @@ class FiniteDiffSolver1D:
         save_procedure(self._raw_temp_map, self._final_temps)
 
 
-diff = 1.58e-4
-cond = 40.
-emis = np.array([[0.001, 0.5]], dtype=np.float64)
-length = 0.0035
+# diff = 1.58e-4
+# cond = 40.
+# emis = np.array([[0.001, 0.5]], dtype=np.float64)
+# length = 0.0035
 
-test_system = ConductiveSystem1D(diff, cond, emis, length)
+# test_system = ConductiveSystem1D(diff, cond, emis, length)
 
-x_res = 100
-initial_temps = load_init_temps(Path("copper_steadystate.csv"))
-gas_temps = np.array([[0.0, 300., 300.],
-                      [0.0995, 300., 300.],
-                      [0.1005, 2500., 300.]], dtype=np.float64)
-htcs = np.array([[0., 100., 100.],
-                 [0.0095, 100., 100.],
-                 [0.1005, 316.227766, 100.]], dtype=np.float64)
-ambient_temp = 300.
+# x_res = 100
+# initial_temps = load_init_temps(Path("copper_steadystate.csv"))
+# gas_temps = np.array([[0.0, 300., 300.],
+#                       [0.0995, 300., 300.],
+#                       [0.1005, 2500., 300.]], dtype=np.float64)
+# htcs = np.array([[0., 100., 100.],
+#                  [0.0095, 100., 100.],
+#                  [0.1005, 316.227766, 100.]], dtype=np.float64)
+# ambient_temp = 300.
 
-test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps, htcs, ambient_temp, x_res, min_sim_time=1.0)
+# test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps, htcs, ambient_temp, x_res, min_sim_time=1.0)
 
-test_solver.run_simulation(conv_tol=1e-6, print_every=10000)
+# test_solver.run_simulation(conv_tol=1e-6, print_every=10000)
 
 
 class FiniteDiffSolverAxial:
@@ -498,6 +498,7 @@ class FiniteDiffSolverAxial:
 
         self.system = system
         self.gas_temperatures = gas_temps
+        self.heat_transfer_coefs = htcs
         self.env_cutoff = env_cutoff
         self.ambient_temperature = ambient_temp
         self.x_resolution = x_res
@@ -766,6 +767,7 @@ class FiniteDiffSolverAxial:
             return
         self._t_step = self._diff_num / (self._system.diffusivity * (self._x_step**(-2) + 2*self._r_step**(-2)))
         self._volcp = self._system.density * self._system.heat_capacity / self._t_step # Used constantly in edge and internal temp calculations
+        self._update_tick_count()
 
 
     def _update_r_map_wide(self):
@@ -1140,12 +1142,49 @@ class FiniteDiffSolverAxial:
         return interior_temps
 
 
+    def _calc_corner_temps(self, tick: int, temps: NDArray[np.float64], emis_lookup: NDArray[np.float64], htcs_lookup: tuple[NDArray[np.float64], NDArray[np.float64]], gas_temp_lookup: tuple[NDArray[np.float64], NDArray[np.float64]]) -> tuple[float, float, float, float]:
+
+        """
+        :param tick: The current iteration tick for indexing.
+        :param temps: The previous iteration of temperatures.
+        :param emis_lookup: The temp-to-emissivity lookup table.
+        :param htcs_lookup: The time-to-htc lookup table.
+        :param gas_temp_lookup: The time-to-gas-temp lookup table.
+        """
+
+        tl_emis: float = emis_lookup[int(temps[-1, 0])]
+        l_h: float = htcs_lookup[0][tick]
+        l_gas_temp: float = gas_temp_lookup[0][tick]
+        tl_temp_a: float = temps[-1, 1]
+        tl_temp_b: float = temps[-2, 0]
+        tl = self._calc_top_left_corner(tl_emis, l_h, l_gas_temp, tl_temp_a, tl_temp_b)
+
+        bl_emis: float = emis_lookup[int(temps[0, 0])]
+        bl_temp_a: float = temps[0, 1]
+        bl_temp_b: float = temps[1, 0]
+        bl = self._calc_bottom_left_corner(bl_emis, l_h, l_gas_temp, bl_temp_a, bl_temp_b)
+
+        tr_emis: float = emis_lookup[int(temps[-1, -1])]
+        r_h: float = htcs_lookup[1][tick]
+        r_gas_temp: float = gas_temp_lookup[1][tick]
+        tr_temp_a: float = temps[-1, -2]
+        tr_temp_b: float = temps[-2, -1]
+        tr = self._calc_top_right_corner(tr_emis, r_h, r_gas_temp, tr_temp_a, tr_temp_b)
+
+        br_emis: float = emis_lookup[int(temps[0, -1])]
+        br_temp_a: float = temps[0, -2]
+        br_temp_b: float = temps[1, -1]
+        br = self._calc_bottom_right_corner(br_emis, r_h, r_gas_temp, br_temp_a, br_temp_b)
+
+        return tl, bl, tr, br
+
+
     ########################################
     # Public Methods
     ########################################
 
 
-    def calc_steady_state(self, print_every: int = 10000) -> NDArray[np.float64]:
+    def calc_steady_state(self, conv_tol: float = 1e-6, print_every: int = 10000, save_tol: float = 1e-3) -> NDArray[np.float64]:
 
         """
         Calculates the steady-state temperature distribution of the defined system and conditions.
@@ -1153,20 +1192,24 @@ class FiniteDiffSolverAxial:
         :param print_every: How often, in ticks, to print residual updates. 0 to disable. 10000 by default.
         """
 
+        # self._validate_inputs(conv_tol, print_every, save_tol)
         self._validate_init_temps()
         temps = self._init_temps
         saved_times: list[float] = [0.0]
         saved_dists: list[NDArray[np.float64]] = [temps]
-        times = np.arange(0, self._max_time + self._t_step, self._t_step)
-        fluxs, gasses, emis_lookup = self._build_lookup_tables(times)
+        times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
+        gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         converged = False
         tick = 0
         while (not converged) and (tick < self._tick_count):
             tick += 1
+            time: float = times[tick]
             new_temps = temps.copy()
-            corner_temps = set_corners()
-            edge_temps = set_edges()
-            etc...
+            corner_temps = self._calc_corner_temps(tick, temps, emis_lookup, htcs, gasses)
+            new_temps[-1, 0], new_temps[0, 0], new_temps[-1, -1], new_temps[0, -1] = corner_temps
+            print(new_temps)
+            edge_temps = self._calc_edge_temps(tick, temps, emis_lookup, htcs, gasses)
+            break
 
 
 
@@ -1188,7 +1231,6 @@ test_system_a = ConductiveSystemAxial(
 x_res_a = 10
 r_res_a = 7
 init_temps_a = np.full((r_res_a, x_res_a), 298.15)
-torch_fluxs_a = np.array([[0.0, 0.5e6, 0.0]])
 gas_temps_a = np.array([[0.0, 2000.0, 298.15]])
 
 test_solver_a = FiniteDiffSolverAxial(
@@ -1196,8 +1238,7 @@ test_solver_a = FiniteDiffSolverAxial(
     x_res = x_res_a,
     r_res = r_res_a,
     initial_temps = init_temps_a,
-    torch_fluxs = torch_fluxs_a,
     gas_temps = gas_temps_a
 )
 
-print(test_solver_a._calc_internal_temps(init_temps_a))
+test_solver_a.calc_steady_state()
