@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 class ConductiveSystem1D:
 
     """
-    Class for 1D heat conduction system. Given diffusivity, conductivity, emissivity, heat transfer coefficients, length, and temperatures.
+    Class for 1D heat conduction system. Given diffusivity, conductivity, emissivity, and length.
     """
 
     def __init__(
@@ -25,7 +25,6 @@ class ConductiveSystem1D:
         :param float diff: The thermal diffusivity of the material [m^2/s].
         :param float cond: The thermal conductivity of the material [W/m/K].
         :param NDArray[np.float64] emis: The emissivities of the material at and above corresponding temperatures. The first column represents the temperatures [K] and the second column represents the emissivities [dimensionless].
-        :param tuple[float, float] htcs: The heat transfer coefficients at the boundaries [W/m^2/K].
         :param float length: The length of the system [m].
         """
 
@@ -95,7 +94,6 @@ class ConductiveSystem1D:
             raise ValueError("Each temperature must be positive.")
         if not (np.all(emis[:, 1] >= 0) and np.all(emis[:, 1] <= 1)):
             raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
-        self._emis_time_points = emis[:, 0]
         self._emis = emis
 
 

@@ -5,20 +5,15 @@
 # ###################
 
 import numpy as np
-from ConductiveSystem import ConductiveSystem1D
+from domain.conductive_system_1D import ConductiveSystem1D
+from domain.lookup_tables import LookupTables
 from DataHandling import load_init_temps, save_procedure
 from numpy.typing import NDArray
 from pathlib import Path
-from typing import NamedTuple
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
 MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
 
-class LookupTables(NamedTuple):
-
-    gas_temp_lookup: tuple[NDArray[np.float64], NDArray[np.float64]]
-    htcs_lookup: tuple[NDArray[np.float64], NDArray[np.float64]]
-    emis_lookup: NDArray[np.float64]
 
 class FiniteDiffSolver1D:
 
@@ -341,13 +336,14 @@ class FiniteDiffSolver1D:
         :param T_old: The old temperature array before the iteration.
         :param tick: The current iteration number.
         :param print_every: The interval at which to print the simulation progress. 0 means no printing.
+        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance.
         :return: True if converged, False otherwise.
         """
 
         sum_square = ((T_new - T_old) ** 2).sum()
         if print_every > 0 and tick % print_every == 0:
             print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        finished = (sum_square <= conv_tol) and (tick * self._t_step >= self._min_time)
+        finished = (float(sum_square) <= conv_tol) and (tick * self._t_step >= self._min_time)
         return finished
 
 
@@ -373,7 +369,7 @@ class FiniteDiffSolver1D:
         Build lookup tables for the simulation data. Drastically reduces the computational cost of interpolation during the simulation.
 
         :param times: The time points for which to build the lookup tables.
-        :return: A tuple of the lookup tables  gas temperature, heat transfer coefs, and emissivity.
+        :return: A tuple of the lookup tables for gas temperature, heat transfer coefs, and emissivity.
         """
 
         gas_data = self._gas_temps
