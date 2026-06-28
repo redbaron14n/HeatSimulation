@@ -4,14 +4,15 @@
 # Data handling service file
 # ###################
 
-from h5py import File
+from h5py import Dataset, File
 from numpy.typing import NDArray
 from pathlib import Path
+from typing import cast
 import numpy as np
 
 FORBIDDEN = "<>:\"/\\|?*"
-REQ_DATA = {"times", "temps", "emis", "htcs", "gas_temps"}
-REQ_ATTR = {"dim", "dx", "dt", "length", "diff", "cond", "temp_ambient"}
+REQ_DATA = {"times", "temps"}
+REQ_ATTR = {"dim", "dx", "dt", "length", "emis", "htcs", "gas_temps", "diff", "cond", "temp_ambient"}
 REQ_2D_ATTR = {"dr", "cp", "dens"}
 
 
@@ -25,6 +26,15 @@ class DataHandler():
         """
 
         self.filepath = filename
+
+        self._loaded_times: NDArray[np.float64] | None = None
+        self._loaded_temps: NDArray[np.float64] | None = None
+
+        self._attrs: dict[str, int | float | NDArray[np.float64]] = {}
+
+        self._file: File | None = None
+        self._snapshot_count: int = 0
+
         self._set_data(load)
 
 
@@ -58,28 +68,23 @@ class DataHandler():
         self._filepath = path
 
 
+    ########################################
+    # Private Methods
+    ########################################
+
+
     def _set_data(self, load: bool):
 
         if not(self._filepath.exists() and load):
             return
         print(f"Loading temperature data from {self._filepath}...")
         with File(str(self._filepath), "r") as f:
-            self._times = np.array(f["times"], dtype=np.float64)
-            self._temps = np.array(f["temps"], dtype=np.float64)
-            self._emis = np.array(f["emis"], dtype=np.float64)
-            self._htcs = np.array(f["htcs"], dtype=np.float64)
-            self._gas_temps = np.array(f["gas_temps"], dtype=np.float64)
-            self._dim = int(f.attrs["dim"]) # Don't know how to make this go away atm
-            self._dx = float(f.attrs["dx"])
-            self._dt = float(f.attrs["dt"])
-            self._length = float(f.attrs["length"])
-            self._diff = float(f.attrs["diff"])
-            self._cond = float(f.attrs["cond"])
-            self._temp_ambient = float(f.attrs["temp_ambient"])
-            if self._dim == 2:
-                self._dr = float(f.attrs["dr"])
-                self._cphc = float(f.attrs["cphc"])
-                self._dens = float(f.attrs["dens"])
+            self._loaded_times = np.array(f["times"], dtype=np.float64)
+            self._loaded_temps = np.array(f["temps"], dtype=np.float64)
+            self._attrs = {
+                name: cast(int | float | NDArray[np.float64], value)
+                  for name, value in f.attrs.items()
+            }
         print("Successfully loaded data.")
 
 
@@ -88,69 +93,82 @@ class DataHandler():
     ########################################
 
     
-    def save_1d_data(
-            self,
-            times: NDArray[np.float64],
-            temps: NDArray[np.float64],
-            emis: NDArray[np.float64],
-            htcs: NDArray[np.float64],
-            gas_temps: NDArray[np.float64],
-            dim: int,
-            dx: float,
-            dt: float,
-            length: float,
-            diff: float,
-            cond: float,
-            temp_ambient: float
-    ):    
-        
+    def save(self, times: NDArray[np.float64], temps: NDArray[np.float64], attrs: dict[str, int | float | NDArray[np.float64]]):
+
         with File(str(self._filepath), "w") as f:
             f.create_dataset("times", data=times)
             f.create_dataset("temps", data=temps, compression="gzip")
-            f.create_dataset("emis", data=emis)
-            f.create_dataset("htcs", data=htcs)
-            f.create_dataset("gas_temps", data=gas_temps)
-            f.attrs["dim"] = dim
-            f.attrs["dx"] = dx
-            f.attrs["dt"] = dt
-            f.attrs["length"] = length
-            f.attrs["diff"] = diff
-            f.attrs["cond"] = cond
-            f.attrs["temp_ambient"] = temp_ambient
+            for name, val in attrs.items():
+                f.attrs[name] = val
 
 
-    def save_2d_data(
-            self,
-            times: NDArray[np.float64],
-            temps: NDArray[np.float64],
-            emis: NDArray[np.float64],
-            htcs: NDArray[np.float64],
-            gas_temps: NDArray[np.float64],
-            dim: int,
-            dx: float,
-            dr: float,
-            dt: float,
-            length: float,
-            diff: float,
-            cond: float,
-            temp_ambient: float,
-            cphc: float,
-            dens: float,
-    ):    
-        
-        with File(str(self._filepath), "w") as f:
-            f.create_dataset("times", data=times)
-            f.create_dataset("temps", data=temps, compression="gzip")
-            f.create_dataset("emis", data=emis)
-            f.create_dataset("htcs", data=htcs)
-            f.create_dataset("gas_temps", data=gas_temps)
-            f.attrs["dim"] = dim
-            f.attrs["dx"] = dx
-            f.attrs["dr"] = dr
-            f.attrs["dt"] = dt
-            f.attrs["length"] = length
-            f.attrs["diff"] = diff
-            f.attrs["cond"] = cond
-            f.attrs["temp_ambient"] = temp_ambient
-            f.attrs["cphc"] = cphc
-            f.attrs["dens"] = dens
+    def initialize_storage(self, resolution: tuple[int, ...], metadata: dict[str, int | float | NDArray[np.float64]]):
+
+        """
+        Preps for storage of simulation data.
+
+        :param resolution: A tuple of integers corresponding to the spatial resolution of the temperature data.
+        :param metadata: A dictionary mapping simulation inputs to attribute names.
+        """
+
+        self._file = File(str(self._filepath), "w")
+        self._times = self._file.create_dataset("times", shape=(0,), maxshape=(None,), dtype=np.float64)
+        self._temps = self._file.create_dataset(
+            "temps",
+            shape=(0,)+resolution,
+            maxshape=(None,)+resolution,
+            dtype=np.float64,
+            compression="gzip"
+        )
+        for name, val in metadata.items():
+            self._file.attrs[name] = val
+        self._snapshot_count: int = 0
+
+
+    def append_snapshots(self, times: NDArray[np.float64], temps: NDArray[np.float64]):
+
+        """
+        Appends a number of snapshots to the stored data.
+
+        :param times: A 1D array of floats.
+        :param temps: A multidimensional array of floats where the first axis has the same length as 'times'.
+        """
+
+        if self._file is None:
+            raise RuntimeError("Storage has not been initialized.")
+        n_new = times.shape[0]
+        if temps.shape[0] != n_new:
+            raise ValueError("Times and temperatures contain differing numbers of snapshots.")
+        old_count = self._snapshot_count
+        new_count = old_count + n_new
+
+        times_ds = cast(Dataset, self._file["times"])
+        times_ds.resize(new_count, 0)
+        times_ds[old_count:new_count] = times
+
+        temps_ds = cast(Dataset, self._file["temps"])
+        temps_ds.resize(new_count, 0)
+        temps_ds[old_count:new_count] = temps
+
+
+    def close(self):
+
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+
+    @property
+    def times(self) -> NDArray[np.float64]:
+
+        if self._loaded_times is None:
+            raise ValueError("No data has been loaded.")
+        return self._loaded_times
+    
+
+    @property
+    def temps(self) -> NDArray[np.float64]:
+
+        if self._loaded_temps is None:
+            raise ValueError("No data has been loaded.")
+        return self._loaded_temps

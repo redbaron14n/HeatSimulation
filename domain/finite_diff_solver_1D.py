@@ -7,9 +7,8 @@
 import numpy as np
 from domain.conductive_system_1D import ConductiveSystem1D
 from domain.lookup_tables import LookupTables
-from DataHandling import load_init_temps, save_procedure
 from numpy.typing import NDArray
-from pathlib import Path
+from services.data_handling import DataHandler
 
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
 MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
@@ -387,6 +386,23 @@ class FiniteDiffSolver1D:
         emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1), emis_data[:, 0], emis_data[:, 1])
 
         return LookupTables(gasses_lookup, htcs_lookup, emis_lookup)
+    
+
+    def _construct_metadata(self) -> dict[str, int | float | NDArray[np.float64]]:
+
+        metadata: dict[str, int | float | NDArray[np.float64]] = {
+            "dim": int(1),
+            "dx": self._x_step,
+            "dt": self._t_step,
+            "length": self._system.length,
+            "diff": self._system.diffusivity,
+            "cond": self._system.conductivity,
+            "temp_ambient": self._ambient_temp,
+            "emis": self._system.emissivities,
+            "htcs": self._htcs,
+            "gas_temps": self._gas_temps
+        }
+        return metadata
 
 
     ########################################
@@ -394,25 +410,30 @@ class FiniteDiffSolver1D:
     ########################################
 
 
-    def run_simulation(self, conv_tol: float = 1e-6, print_every: int = 1000, save_tol: float = 1e-3):
+    def run_simulation(self, filename: str, conv_tol: float = 1e-6, print_every: int = 1000, save_tol: float = 1e-3, chunk_size: int = 1000):
 
         """
         Run the finite difference simulation for the given system and solver parameters.
 
+        :param filename: The filename to save the data to.
         :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance. Default is 1e-6.
         :param print_every: The interval at which to print the simulation progress. Default is 1000. 0 means no printing.
         :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
+        :param chunk_size: How many distributions to calculate before saving.
         """
 
         self._validate_init_temps() # Ensure initial temperatures are valid before starting simulation
         temps = self._init_temps
-        last_saved = np.hstack((np.array([0.0]), temps))
-        self._raw_temp_list: list[NDArray[np.float64]] = [last_saved]
         times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
+        buffer_times: list[float] = [0.]
+        buffer_temps: list[NDArray[np.float64]] = [temps.copy()]
+        last_saved = temps.copy()
+        file = DataHandler(filename, load=False)
+        file.initialize_storage((self._x_res,), self._construct_metadata())
         converged = False
         tick = 0
-        saved = 0
+        saved = 1
         while (not converged) and (tick < self._tick_count):
             tick += 1
             T_new = temps.copy()
@@ -426,34 +447,14 @@ class FiniteDiffSolver1D:
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
             converged = self._check_convergence(T_new, temps, tick, print_every, conv_tol)
-            if (((T_new - last_saved[1:])**2).sum() >= save_tol) or converged:
-                last_saved = np.hstack((np.array([time]), T_new))
-                self._raw_temp_list.append(last_saved)
+            if (np.sqrt(((T_new - last_saved)**2).mean()) >= save_tol) or converged:
+                buffer_times.append(time)
+                buffer_temps.append(T_new)
                 saved += 1
+            if (saved % chunk_size == 0) or converged:
+                file.append_snapshots(np.array(buffer_times), np.array(buffer_temps))
+                buffer_times = []
+                buffer_temps = []
             temps = T_new
         self._final_temps = temps
-        self._raw_temp_map = np.array(self._raw_temp_list)
         self._simulation_summary(tick, saved, converged)
-        save_procedure(self._raw_temp_map, self._final_temps)
-
-
-diff = 1.58e-4
-cond = 40.
-emis = np.array([[0.001, 0.5]], dtype=np.float64)
-length = 0.0035
-
-test_system = ConductiveSystem1D(diff, cond, emis, length)
-
-x_res = 100
-initial_temps = load_init_temps(Path("copper_steadystate.csv"))
-gas_temps = np.array([[0.0, 300., 300.],
-                      [0.0095, 300., 300.],
-                      [0.1005, 2500., 300.]], dtype=np.float64)
-htcs = np.array([[0., 100., 100.],
-                 [0.0095, 100., 100.],
-                 [0.1005, 316.227766, 100.]], dtype=np.float64)
-ambient_temp = 300.
-
-test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps, htcs, ambient_temp, x_res, min_sim_time=1.0)
-
-test_solver.run_simulation(conv_tol=1e-6, print_every=10000)
