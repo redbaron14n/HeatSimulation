@@ -10,6 +10,8 @@ from domain.lookup_tables import LookupTables
 from numpy.typing import NDArray
 from services.data_handling import DataHandler
 
+np.set_printoptions(linewidth=200, threshold=10)
+
 BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
 MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
 
@@ -326,24 +328,17 @@ class FiniteDiffSolver1D:
         return T_new
 
 
-    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], tick: int, print_every: int, conv_tol: float) -> bool:
+    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], conv_tol: float, sim_time: float) -> tuple[bool, float]:
 
-        """
-        Check for convergence of the iterative solver based on the sum of squared differences between new and old temperature arrays.
+        rms = np.sqrt(((T_new - T_old)**2).mean())
+        finished = (rms <= conv_tol) and (sim_time >= self._min_time)
+        return finished, rms
+    
 
-        :param T_new: The new temperature array after an iteration.
-        :param T_old: The old temperature array before the iteration.
-        :param tick: The current iteration number.
-        :param print_every: The interval at which to print the simulation progress. 0 means no printing.
-        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance.
-        :return: True if converged, False otherwise.
-        """
+    def _print_update(self, temps: NDArray[np.float64], tick: int, sim_time: float, rms: float, saved: int, print_every: int):
 
-        sum_square = ((T_new - T_old) ** 2).sum()
-        if print_every > 0 and tick % print_every == 0:
-            print(f"Tick {tick}: [{T_new[0]:.3f}, {T_new[1]:.3f}, {T_new[2]:.3f}, ..., {T_new[-2]:.3f}, {T_new[-1]:.3f}], Sum Square: {sum_square:.2e}")
-        finished = (float(sum_square) <= conv_tol) and (tick * self._t_step >= self._min_time)
-        return finished
+        if (print_every > 0) and (tick % print_every == 0):
+            print(f"Tick {tick:,d}, T+{sim_time:.3f}[s], RMS: {rms:.3e}, Saved {saved:,d} snapshots.\n{temps}")
 
 
     def _simulation_summary(self, tick: int, saved: int, converged: bool):
@@ -428,6 +423,7 @@ class FiniteDiffSolver1D:
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         buffer_times: list[float] = [0.]
         buffer_temps: list[NDArray[np.float64]] = [temps.copy()]
+        buffer_size: int = 1
         last_saved = temps.copy()
         file = DataHandler(filename, load=False)
         file.initialize_storage((self._x_res,), self._construct_metadata())
@@ -446,15 +442,20 @@ class FiniteDiffSolver1D:
             T_new[0] = self._solve_boundary_temp(emis0, htc0, T_inside0, gas_temp0)
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
-            converged = self._check_convergence(T_new, temps, tick, print_every, conv_tol)
-            if (np.sqrt(((T_new - last_saved)**2).mean()) >= save_tol) or converged:
+            converged, rms = self._check_convergence(T_new, temps, conv_tol, time)
+            rms_last = np.sqrt(((T_new - last_saved)**2).mean())
+            if (rms_last >= save_tol) or converged:
                 buffer_times.append(time)
                 buffer_temps.append(T_new)
+                last_saved = T_new
                 saved += 1
-            if (saved % chunk_size == 0) or converged:
+                buffer_size += 1
+            self._print_update(T_new, tick, time, rms, saved, print_every)
+            if ((buffer_size != 0) and (buffer_size % chunk_size == 0)) or converged:
                 file.append_snapshots(np.array(buffer_times), np.array(buffer_temps))
                 buffer_times = []
                 buffer_temps = []
+                buffer_size = 0
             temps = T_new
         self._final_temps = temps
         self._simulation_summary(tick, saved, converged)
