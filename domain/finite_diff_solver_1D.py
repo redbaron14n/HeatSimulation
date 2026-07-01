@@ -430,6 +430,42 @@ class FiniteDiffSolver1D:
     ########################################
 
 
+    def create_chop_schedule(self, array_map: NDArray[np.float64], period: float, max_time: float) -> NDArray[np.float64]:
+
+        """
+        Given a 2D array of floats, returns a longer repeating version where the first column is increasing each repetition by 'period' until 'max_time' is reached.
+
+        :param array_map: The 2D array of floats mapping gas temperatures or heat transfer coefficients to simulation time.
+        :param period: By how much each unit array's time values should increaase each time they repeat.
+        :param max_time: Determines how many repetitions should be made. The final row will have first column less than this value.
+
+        :return: The lengthed periodic 2D array.
+        """
+
+        if len(array_map.shape) != 2:
+            raise ValueError(f"Inputted array must be 2D. Given array has shape {array_map.shape}.")
+        if any(array_map[:, 0] < 0.):
+            raise ValueError("All entries in the first column of the array must be non-negative.")
+        if len(np.unique(array_map[:, 0])) < len(array_map[:, 0]):
+            raise ValueError("All entries in the first column of the array must be unique.")
+        array_map = array_map[array_map[:, 0].argsort()]
+        if period <= array_map[-1, 0]:
+            raise ValueError(f"Period must be greater than the greatest entry in the first column, but {period} <= {array_map[-1, 0]}.")
+        if max_time <= period:
+            raise ValueError(f"The max time must be greater than the given period, but {max_time} <= {period}.")
+        
+        n_repeats = float(np.floor(max_time / period))
+        blocks: list[NDArray[np.float64]] = []
+        i = 0.
+        while i <= n_repeats:
+            block = array_map.copy()
+            block[:, 0] += i * period
+            blocks.append(block)
+            i += 1
+        result = np.vstack(blocks)
+        return result[result[:, 0] < max_time]
+
+
     def run_simulation(
             self,
             filename: str,
