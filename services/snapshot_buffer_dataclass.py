@@ -8,3 +8,4 @@ class SnapshotBuffer:
     temps: list[NDArray[float64]]
     size: int
     last_saved: NDArray[float64]
+    last_saved_time: float

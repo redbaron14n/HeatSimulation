@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import cast
 import numpy as np
 
-FORBIDDEN = "<>:\"/\\|?*"
+FORBIDDEN = "<>:\"|?*"
 REQ_DATA = {"times", "temps"}
 REQ_ATTR = {"dim", "dx", "dt", "length", "emis", "htcs", "gas_temps", "diff", "cond", "temp_ambient"}
 REQ_2D_ATTR = {"dr", "cp", "dens"}
@@ -150,6 +150,7 @@ class DataHandler():
         temps_ds = cast(Dataset, self._file["temps"])
         temps_ds.resize(new_count, 0)
         temps_ds[old_count:new_count] = temps
+        self._snapshot_count = new_count
 
 
     def close(self):
@@ -187,3 +188,9 @@ class DataHandler():
     def init_temps(self, temps: NDArray[np.float64]):
 
         self._init_temps = temps
+
+    
+    @property
+    def length(self) -> float:
+
+        return cast(float, self._attrs["length"])

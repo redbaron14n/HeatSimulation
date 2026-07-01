@@ -25,6 +25,7 @@ class FiniteDiffSolver1D:
             initial_temps: NDArray[np.float64] | None = None,
             gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
             htcs: NDArray[np.float64] = np.array([[0.0, 100., 100.]], dtype=np.float64),
+            chop_period: float | None = None,
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
             min_sim_time: float = 0.0,
@@ -37,6 +38,7 @@ class FiniteDiffSolver1D:
         :param initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
         :param gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures introduced at that time. Default is room temperature (298.15 K) on both sides.
         :param htcs: The heat transfer coefficients [W/m^2/K] at the boundaries. The first column is time and the second and third columns are the new constant coefficients introduced at that time. Default is 100 on both sides.
+        :param chop_period: The time after which the gas temperature and heat transfer coefficient time maps repeat. Default is None.
         :param ambient_temp: The ambient temperature for the simulation [K].
         :param spatial_res: The number of spatial points to use in the finite difference grid.
         :param min_sim_time: The minimum simulation time to run the solver for [s].
@@ -119,6 +121,30 @@ class FiniteDiffSolver1D:
         if not np.all(htcs[:, 1:] >= 0.):
             raise ValueError("All given heat transfer coefficients must be non-negative.")
         self._htcs = htcs
+
+
+    @property
+    def chop_period(self) -> float | None:
+
+        """
+        :return: The time after which the gas temperature and heat transfer coefficient time maps repeat.
+        """
+
+        return self._period
+    
+
+    @chop_period.setter
+    def chop_period(self, period: float | None):
+
+        if period is None:
+            self._period = None
+        elif period <= 0:
+            raise ValueError(f"Period must be positive. Given {period}.")
+        elif any(self._gas_temps[:, 0] >= period):
+            raise ValueError(f"Period must be greater than all values in the first column of the passed gas temperature array.")
+        elif any(self._htcs[:, 0] >= period):
+            raise ValueError(f"Period must be greater than all values in the first column of the passed heat transfer coefficient array.")
+        self._period = period
 
 
     @property
@@ -375,8 +401,8 @@ class FiniteDiffSolver1D:
         gas_temp1_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 2], left=self._ambient_temp)
         gasses_lookup = (gas_temp0_lookup, gas_temp1_lookup)
 
-        htcs0_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 1], left=100.)
-        htcs1_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 2], left=100.)
+        htcs0_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 1])
+        htcs1_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 2])
         htcs_lookup = (htcs0_lookup, htcs1_lookup)
 
         emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1), emis_data[:, 0], emis_data[:, 1])
@@ -410,18 +436,23 @@ class FiniteDiffSolver1D:
             converged: bool,
             saved: int,
             save_tol: float,
+            time_tol: float,
             chunk_size: int
     ) -> int:
         
         rms_last = np.sqrt(((new_temps - buffer.last_saved)**2).mean()) # pyright: ignore[reportPossiblyUnboundVariable]
-        if (rms_last >= save_tol) or converged:
+        if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or converged:
             buffer.times.append(time) # pyright: ignore[reportPossiblyUnboundVariable]
             buffer.temps.append(new_temps) # pyright: ignore[reportPossiblyUnboundVariable]
             buffer.last_saved = new_temps
+            buffer.last_saved_time = time
             saved += 1
             buffer.size += 1 # pyright: ignore[reportPossiblyUnboundVariable]
         if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or converged: # pyright: ignore[reportPossiblyUnboundVariable]
             file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
+            buffer.times.clear()
+            buffer.temps.clear()
+            buffer.size = 0
         return saved
 
 
@@ -475,6 +506,7 @@ class FiniteDiffSolver1D:
             conv_tol: float = 1e-6,
             print_every: int = 1000,
             save_tol: float = 1e-3,
+            time_tol: float = 1e-3,
             chunk_size: int = 1000
     ):
 
@@ -501,7 +533,7 @@ class FiniteDiffSolver1D:
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         saved = 0
         if save_evo:
-            buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy())
+            buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
             saved = 1
         converged = False
         tick = 0
@@ -521,7 +553,7 @@ class FiniteDiffSolver1D:
             temps = T_new
             self._print_update(T_new, tick, time, rms, saved, print_every)
             if save_evo:
-                saved = self._handle_snapshot_saving(file, buffer, T_new, time, converged, saved, save_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+                saved = self._handle_snapshot_saving(file, buffer, T_new, time, converged, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
         self._final_temps = temps
         if save_final:
             file.init_temps = temps
