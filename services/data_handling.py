@@ -29,6 +29,7 @@ class DataHandler():
 
         self._loaded_times: NDArray[np.float64] | None = None
         self._loaded_temps: NDArray[np.float64] | None = None
+        self._init_temps: NDArray[np.float64] | None = None
 
         self._attrs: dict[str, int | float | NDArray[np.float64]] = {}
 
@@ -172,3 +173,17 @@ class DataHandler():
         if self._loaded_temps is None:
             raise ValueError("No data has been loaded.")
         return self._loaded_temps
+    
+
+    @property
+    def init_temps(self) -> NDArray[np.float64]:
+
+        if self._init_temps is None:
+            raise ValueError("No initial temperatures have been loaded.")
+        return self._init_temps
+    
+
+    @init_temps.setter
+    def init_temps(self, temps: NDArray[np.float64]):
+
+        self._init_temps = temps

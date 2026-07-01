@@ -9,6 +9,7 @@ from domain.conductive_system_1D import ConductiveSystem1D
 from domain.lookup_tables import LookupTables
 from numpy.typing import NDArray
 from services.data_handling import DataHandler
+from services.snapshot_buffer_dataclass import SnapshotBuffer
 
 np.set_printoptions(linewidth=200, threshold=10)
 
@@ -241,9 +242,9 @@ class FiniteDiffSolver1D:
     ########################################
 
 
-    def _validate_init_temps(self): # Call this before running the simulation to catch if x_res was changed without updating initial temperatures
+    def _validate_init_temps(self, temps: NDArray[np.float64]): # Call this before running the simulation to catch if x_res was changed without updating initial temperatures
 
-        if len(self._init_temps) != self._x_res:
+        if len(temps) != self._x_res:
             raise ValueError("Length of initial temperatures array must match spatial resolution.")
         
 
@@ -398,6 +399,30 @@ class FiniteDiffSolver1D:
             "gas_temps": self._gas_temps
         }
         return metadata
+    
+
+    def _handle_snapshot_saving(
+            self,
+            file: DataHandler,
+            buffer: SnapshotBuffer,
+            new_temps: NDArray[np.float64],
+            time: float,
+            converged: bool,
+            saved: int,
+            save_tol: float,
+            chunk_size: int
+    ) -> int:
+        
+        rms_last = np.sqrt(((new_temps - buffer.last_saved)**2).mean()) # pyright: ignore[reportPossiblyUnboundVariable]
+        if (rms_last >= save_tol) or converged:
+            buffer.times.append(time) # pyright: ignore[reportPossiblyUnboundVariable]
+            buffer.temps.append(new_temps) # pyright: ignore[reportPossiblyUnboundVariable]
+            buffer.last_saved = new_temps
+            saved += 1
+            buffer.size += 1 # pyright: ignore[reportPossiblyUnboundVariable]
+        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or converged: # pyright: ignore[reportPossiblyUnboundVariable]
+            file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
+        return saved
 
 
     ########################################
@@ -405,31 +430,45 @@ class FiniteDiffSolver1D:
     ########################################
 
 
-    def run_simulation(self, filename: str, conv_tol: float = 1e-6, print_every: int = 1000, save_tol: float = 1e-3, chunk_size: int = 1000):
+    def run_simulation(
+            self,
+            filename: str,
+            save_evo: bool = True,
+            save_final: bool = False,
+            load_prev: bool = False,
+            conv_tol: float = 1e-6,
+            print_every: int = 1000,
+            save_tol: float = 1e-3,
+            chunk_size: int = 1000
+    ):
 
         """
         Run the finite difference simulation for the given system and solver parameters.
 
         :param filename: The filename to save the data to.
+        :param save_evo: Whether to save periodic snapshots of the temperature evolution over time to the file. Default is True.
+        :param save_final: Whether to save the final temperature distribution to the file. Default is False.
+        :param load_prev_final: Whether to load the previously saved final temperature distribution to use as this run's initial temperature distribution. Default is False.
         :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance. Default is 1e-6.
         :param print_every: The interval at which to print the simulation progress. Default is 1000. 0 means no printing.
         :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
         :param chunk_size: How many distributions to calculate before saving.
         """
 
-        self._validate_init_temps() # Ensure initial temperatures are valid before starting simulation
-        temps = self._init_temps
-        times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
-        gasses, htcs, emis_lookup = self._build_lookup_tables(times)
-        buffer_times: list[float] = [0.]
-        buffer_temps: list[NDArray[np.float64]] = [temps.copy()]
-        buffer_size: int = 1
-        last_saved = temps.copy()
         file = DataHandler(filename, load=False)
         file.initialize_storage((self._x_res,), self._construct_metadata())
+        temps = self._init_temps
+        if load_prev:
+            temps = file.init_temps
+        self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
+        times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
+        gasses, htcs, emis_lookup = self._build_lookup_tables(times)
+        saved = 0
+        if save_evo:
+            buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy())
+            saved = 1
         converged = False
         tick = 0
-        saved = 1
         while (not converged) and (tick < self._tick_count):
             tick += 1
             T_new = temps.copy()
@@ -443,19 +482,11 @@ class FiniteDiffSolver1D:
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
             converged, rms = self._check_convergence(T_new, temps, conv_tol, time)
-            rms_last = np.sqrt(((T_new - last_saved)**2).mean())
-            if (rms_last >= save_tol) or converged:
-                buffer_times.append(time)
-                buffer_temps.append(T_new)
-                last_saved = T_new
-                saved += 1
-                buffer_size += 1
-            self._print_update(T_new, tick, time, rms, saved, print_every)
-            if ((buffer_size != 0) and (buffer_size % chunk_size == 0)) or converged:
-                file.append_snapshots(np.array(buffer_times), np.array(buffer_temps))
-                buffer_times = []
-                buffer_temps = []
-                buffer_size = 0
             temps = T_new
+            self._print_update(T_new, tick, time, rms, saved, print_every)
+            if save_evo:
+                saved = self._handle_snapshot_saving(file, buffer, T_new, time, converged, saved, save_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
         self._final_temps = temps
+        if save_final:
+            file.init_temps = temps
         self._simulation_summary(tick, saved, converged)
