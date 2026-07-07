@@ -37,7 +37,6 @@ class FiniteDiffSolver1D:
         :param initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
         :param gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures introduced at that time. Default is room temperature (298.15 K) on both sides.
         :param htcs: The heat transfer coefficients [W/m^2/K] at the boundaries. The first column is time and the second and third columns are the new constant coefficients introduced at that time. Default is 100 on both sides.
-        :param chop_period: The time after which the gas temperature and heat transfer coefficient time maps repeat. Default is None.
         :param ambient_temp: The ambient temperature for the simulation [K].
         :param spatial_res: The number of spatial points to use in the finite difference grid.
         :param min_sim_time: The minimum simulation time to run the solver for [s].
@@ -120,30 +119,6 @@ class FiniteDiffSolver1D:
         if not np.all(htcs[:, 1:] >= 0.):
             raise ValueError("All given heat transfer coefficients must be non-negative.")
         self._htcs = htcs
-
-
-    @property
-    def chop_period(self) -> float | None:
-
-        """
-        :return: The time after which the gas temperature and heat transfer coefficient time maps repeat.
-        """
-
-        return self._period
-    
-
-    @chop_period.setter
-    def chop_period(self, period: float | None):
-
-        if period is None:
-            self._period = None
-        elif period <= 0:
-            raise ValueError(f"Period must be positive. Given {period}.")
-        elif any(self._gas_temps[:, 0] >= period):
-            raise ValueError(f"Period must be greater than all values in the first column of the passed gas temperature array.")
-        elif any(self._htcs[:, 0] >= period):
-            raise ValueError(f"Period must be greater than all values in the first column of the passed heat transfer coefficient array.")
-        self._period = period
 
 
     @property
@@ -421,7 +396,8 @@ class FiniteDiffSolver1D:
             "temp_ambient": self._ambient_temp,
             "emis": self._system.emissivities,
             "htcs": self._htcs,
-            "gas_temps": self._gas_temps
+            "gas_temps": self._gas_temps,
+            "init_temps": self._init_temps
         }
         return metadata
     

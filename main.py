@@ -1,6 +1,7 @@
 from domain.conductive_system_1D import ConductiveSystem1D
 from domain.finite_diff_solver_1D import FiniteDiffSolver1D
 from pathlib import Path
+from services.data_handling import DataHandler
 from visualizer import time_evolution_plot
 import numpy as np
 
@@ -14,17 +15,37 @@ test_system = ConductiveSystem1D(diff, cond, emis, length)
 
 x_res = 25
 initial_temps = np.full(x_res, 298.15)
-gas_temps_kernel = np.array([[0., 2500., 298.15], [1., 2500., 298.15], [1.1, 298.15, 298.15], [1.9, 298.15, 298.15]], dtype=np.float64)
-htcs_kernel = np.array([[0., 5000., 10.], [1., 5000., 10.], [1.1, 10., 10.], [1.9, 10., 10.]], dtype=np.float64)
+
+gas_temps_kernel = np.array([
+    [0., 3000., 298.15],
+    [0.1, 3000., 298.15],
+    [0.2, 298.15, 298.15],
+    [2.9, 298.15, 298.15]
+], dtype=np.float64)
+
+htcs_kernel = np.array([
+    [0., 500., 10.],
+    [0.1, 500., 10.],
+    [0.2, 10., 10.],
+    [2.9, 10., 10.]
+], dtype=np.float64)
+
 ambient_temp = 298.15
 
-test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps_kernel, htcs_kernel, ambient_temp, x_res, min_sim_time=1.0, max_sim_time=50)
+max_sim_time = 50.
 
-gas_temps = test_solver.create_chop_schedule(gas_temps_kernel, 2., 50.)
+test_solver = FiniteDiffSolver1D(test_system, initial_temps, gas_temps_kernel, htcs_kernel, ambient_temp, x_res, min_sim_time=1.0, max_sim_time=max_sim_time)
+
+gas_temps = test_solver.create_chop_schedule(gas_temps_kernel, 3., max_sim_time)
 test_solver.gas_temperatures = gas_temps
-htcs = test_solver.create_chop_schedule(htcs_kernel, 2., 50.)
+htcs = test_solver.create_chop_schedule(htcs_kernel, 3., max_sim_time)
 test_solver.heat_transfer_coefs = htcs
 
-test_solver.run_simulation("steel316_survival_test_extreme.hdf5", conv_tol=1e-6, print_every=10000, save_tol=0.01, time_tol=1e-4)
+test_solver.run_simulation("steel316_blade_survival_test.hdf5", conv_tol=1e-6, print_every=100000, save_tol=0.01, time_tol=1e-4)
 
-time_evolution_plot(Path("steel316_survival_test_extreme.hdf5"))
+file = DataHandler("steel316_blade_survival_test.hdf5")
+file.load_data()
+max_temp = np.max(file.temps)
+print(max_temp)
+
+time_evolution_plot(Path("steel316_blade_survival_test.hdf5"))
