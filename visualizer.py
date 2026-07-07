@@ -1,5 +1,4 @@
 from matplotlib.widgets import Slider
-from pathlib import Path
 from services.data_handling import DataHandler
 from typing import Any, cast
 import matplotlib.pyplot as _plt
@@ -7,10 +6,12 @@ import numpy as np
 
 plt = cast(Any, _plt)
 
+DIRECTORY = "Data/"
 
-def time_evolution_plot(file_path: Path):
 
-    handler = DataHandler(str(file_path))
+def time_evolution_plot(filename: str):
+
+    handler = DataHandler(filename)
     handler.load_data()
     times = handler.times
     temps = handler.temps
@@ -45,4 +46,43 @@ def time_evolution_plot(file_path: Path):
         fig.canvas.draw_idle()
 
     time_slider.on_changed(update)
+    plt.show()
+
+
+def front_and_back_temp_plot(filename: str):
+
+    handler = DataHandler(filename)
+    handler.load_data()
+    times = handler.times
+    temps = handler.temps[:, np.array([0, -1])]
+    print(temps)
+
+    _fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_title("Temperature Evolution at Front and Rear of Sample")
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temperature [K]")
+
+    front = temps[:, 0]
+    rear = temps[:, 1]
+
+    front_min_mask = (front[1:-1] < front[:-2]) & (front[1:-1] < front[2:])
+    front_min_indices = np.where(front_min_mask)[0]+1
+    front_min_temps = front[front_min_indices]
+    front_min_times = times[front_min_indices]
+    ax.scatter(front_min_times, front_min_temps, color="Blue", s=20, zorder=5, marker="x")
+
+    rear_min_mask = (rear[1:-1] < rear[:-2]) & (rear[1:-1] < rear[2:])
+    rear_min_indices = np.where(rear_min_mask)[0]+1
+    rear_min_temps = rear[rear_min_indices]
+    rear_min_times = times[rear_min_indices]
+    ax.scatter(rear_min_times, rear_min_temps, color="Red", s=20, zorder=5, marker="x")
+
+    ax.plot(times, front, label="Front")
+    ax.plot(times, rear, label="Rear")
+
+    min_temp = np.min(temps)
+    max_temp = np.max(temps)
+    temp_diff = max_temp - min_temp
+    ax.set_ylim(min_temp - temp_diff/10, max_temp + temp_diff/10)
+    ax.grid(True)
     plt.show()
