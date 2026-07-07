@@ -25,7 +25,6 @@ class FiniteDiffSolver1D:
             initial_temps: NDArray[np.float64] | None = None,
             gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
             htcs: NDArray[np.float64] = np.array([[0.0, 100., 100.]], dtype=np.float64),
-            chop_period: float | None = None,
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
             min_sim_time: float = 0.0,
@@ -523,12 +522,13 @@ class FiniteDiffSolver1D:
         :param chunk_size: How many distributions to calculate before saving.
         """
 
-        file = DataHandler(filename, load=False)
-        file.initialize_storage((self._x_res,), self._construct_metadata())
-        temps = self._init_temps
+        file = DataHandler(filename)
         if load_prev:
-            temps = file.init_temps
+            file.load_data()
+            self._init_temps = file.init_temps
+        temps = self._init_temps
         self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
+        file.initialize_storage((self._x_res,), self._construct_metadata())
         times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         saved = 0
@@ -557,4 +557,5 @@ class FiniteDiffSolver1D:
         self._final_temps = temps
         if save_final:
             file.init_temps = temps
+        file.close()
         self._simulation_summary(tick, saved, converged)

@@ -10,7 +10,8 @@ plt = cast(Any, _plt)
 
 def time_evolution_plot(file_path: Path):
 
-    handler = DataHandler(str(file_path), load=True)
+    handler = DataHandler(str(file_path))
+    handler.load_data()
     times = handler.times
     temps = handler.temps
     length = handler.length
