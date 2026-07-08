@@ -55,7 +55,6 @@ def front_and_back_temp_plot(filename: str):
     handler.load_data()
     times = handler.times
     temps = handler.temps[:, np.array([0, -1])]
-    print(temps)
 
     _fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_title("Temperature Evolution at Front and Rear of Sample")
