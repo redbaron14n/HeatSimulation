@@ -479,8 +479,8 @@ class FiniteDiffSolver1D:
             save_final: bool = False,
             load_prev: bool = False,
             conv_tol: float = 1e-6,
-            print_every: int = 1000,
-            save_tol: float = 1e-3,
+            print_every: int = 100000,
+            save_tol: float = 0.01,
             time_tol: float = 1e-3,
             chunk_size: int = 1000
     ):
