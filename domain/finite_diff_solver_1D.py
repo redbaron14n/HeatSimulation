@@ -10,6 +10,7 @@ from domain.lookup_tables import LookupTables
 from numpy.typing import NDArray
 from services.data_handling import DataHandler
 from services.snapshot_buffer_dataclass import SnapshotBuffer
+from time import perf_counter
 
 np.set_printoptions(linewidth=200, threshold=10)
 
@@ -336,13 +337,14 @@ class FiniteDiffSolver1D:
         return finished, rms
     
 
-    def _print_update(self, temps: NDArray[np.float64], tick: int, sim_time: float, rms: float, saved: int, print_every: int):
+    def _print_update(self, temps: NDArray[np.float64], tick: int, sim_time: float, start_time: float, rms: float, saved: int, print_every: int):
 
         if (print_every > 0) and (tick % print_every == 0):
-            print(f"Tick {tick:,d}, T+{sim_time:.3f}[s], RMS: {rms:.3e}, Saved {saved:,d} snapshots.\n{temps}")
+            runtime = perf_counter() - start_time
+            print(f"Tick {tick:,d}, T+{sim_time:.3f}[s], R+{runtime:.3f}[s], RMS: {rms:.3e}, Saved {saved:,d} snapshots.\n{temps}")
 
 
-    def _simulation_summary(self, tick: int, saved: int, converged: bool):
+    def _simulation_summary(self, tick: int, sim_time: float, start_time: float, saved: int, converged: bool):
 
         """
         Print a summary of the simulation results after completion.
@@ -352,10 +354,11 @@ class FiniteDiffSolver1D:
         :param converged: Whether the simulation converged or reached maximum time without convergence.
         """
 
+        runtime = perf_counter() - start_time
         if converged:
-            print(f"Simulation converged in {tick} ticks with {saved} saved data points.")
+            print(f"Simulation converged in {tick} ticks or {sim_time:.3f}s with {saved} saved data points.\nSimulation took {runtime:.3f}s to run and averaged {tick/runtime:.3f} ticks/s.")
         else:
-            print(f"Simulation reached maximum time without convergence with {saved} saved data points.")
+            print(f"Simulation reached maximum time without convergence with {saved} saved data points.\nSimulation took {runtime:.3f}s to run and averaged {tick/runtime:.3f} ticks/s.")
 
 
     def _build_lookup_tables(self, times: NDArray[np.float64]) -> LookupTables:
@@ -513,11 +516,12 @@ class FiniteDiffSolver1D:
             saved = 1
         converged = False
         tick = 0
+        start_time = perf_counter()
         while (not converged) and (tick < self._tick_count):
             tick += 1
             T_new = temps.copy()
             T_inside0, T_inside1 = temps[1], temps[-2] # Finds the previous temperatures just inside the boundaries
-            time = times[tick]
+            sim_time: float = times[tick]
             gas_temp0, gas_temp1 = gasses[0][tick], gasses[1][tick]
             htc0, htc1 = htcs[0][tick], htcs[1][tick]
             emis = emis_lookup[temps.astype(int)]
@@ -525,13 +529,14 @@ class FiniteDiffSolver1D:
             T_new[0] = self._solve_boundary_temp(emis0, htc0, T_inside0, gas_temp0)
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
-            converged, rms = self._check_convergence(T_new, temps, conv_tol, time)
+            converged, rms = self._check_convergence(T_new, temps, conv_tol, sim_time)
             temps = T_new
-            self._print_update(T_new, tick, time, rms, saved, print_every)
+            self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)
             if save_evo:
-                saved = self._handle_snapshot_saving(file, buffer, T_new, time, converged, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, converged, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
         self._final_temps = temps
+        sim_time = times[tick]
         if save_final:
             file.init_temps = temps
         file.close()
-        self._simulation_summary(tick, saved, converged)
+        self._simulation_summary(tick, sim_time, start_time, saved, converged)

@@ -9,13 +9,11 @@ plt = cast(Any, _plt)
 DIRECTORY = "Data/"
 
 
-def time_evolution_plot(filename: str):
+def time_evolution_plot(data: DataHandler):
 
-    handler = DataHandler(filename)
-    handler.load_data()
-    times = handler.times
-    temps = handler.temps
-    length = handler.length
+    times = data.times
+    temps = data.temps
+    length = data.length
 
     x_positions = np.linspace(0., length, temps.shape[1])
     fig, ax = plt.subplots(figsize = (10, 6))
@@ -49,12 +47,10 @@ def time_evolution_plot(filename: str):
     plt.show()
 
 
-def front_and_back_temp_plot(filename: str):
+def front_and_back_temp_plot(data: DataHandler):
 
-    handler = DataHandler(filename)
-    handler.load_data()
-    times = handler.times
-    temps = handler.temps[:, np.array([0, -1])]
+    times = data.times
+    temps = data.temps[:, np.array([0, -1])]
 
     _fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_title("Temperature Evolution at Front and Rear of Sample")

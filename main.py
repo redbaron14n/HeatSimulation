@@ -15,13 +15,15 @@ def run_configuration(
         period: float = 0.,
         x_res: int = 25,
         ambient_temp: float = 298.15,
+        init_temps: NDArray[np.float64] | None = None,
         min_sim_time: float = 5.,
         max_sim_time: float = 50.,
 ):
     
     diff, cond, emis = material
     system = ConductiveSystem1D(diff, cond, emis, length)
-    init_temps = np.full(x_res, ambient_temp, dtype=np.float64)
+    if init_temps is None:
+        init_temps = np.full(x_res, ambient_temp, dtype=np.float64)
     solver = FiniteDiffSolver1D(system, init_temps, gas_temp_kernel, htcs_kernel, ambient_temp, x_res, min_sim_time, max_sim_time)
     if period != 0.:
         solver.gas_temperatures = solver.create_chop_schedule(gas_temp_kernel, period, max_sim_time)
@@ -29,7 +31,28 @@ def run_configuration(
     solver.run_simulation(filename)
 
 
-filename = "copper_chop_after_steady.hdf5"
-run_configuration(filename, COPPER, 0.0035, GAS_2200_CONSTANT_ARRAY, HTCS_300_CONSTANT_ARRAY, 0., max_sim_time=1000)
-time_evolution_plot(filename)
-front_and_back_temp_plot(filename)
+def get_final_temps(filename: str) -> NDArray[np.float64]:
+
+    steadystate_data = DataHandler(filename)
+    steadystate_data.load_data()
+    final_temps = steadystate_data.temps[-1]
+    steadystate_data.close()
+    return final_temps
+
+
+def print_reports(data: DataHandler):
+
+    data.report_convergence_time()
+    data.report_final_avg_temp()
+
+
+filename = "copper_hvaf15in_3s_chop"
+init_temps = get_final_temps("copper_steadystate_hvaf15in.hdf5")
+run_configuration(filename, COPPER, 0.0035, GAS_2200_CONSTANT_ARRAY, HTCS_300_10_5_300_ARRAY, 3.0, init_temps=init_temps, max_sim_time=100)
+
+data = DataHandler(filename)
+data.load_data()
+time_evolution_plot(data)
+front_and_back_temp_plot(data)
+print_reports(data)
+data.close()
