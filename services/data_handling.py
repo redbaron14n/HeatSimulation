@@ -188,6 +188,34 @@ class DataHandler():
         self._snapshot_count = new_count
 
 
+    def report_convergence_time(self, chop: bool=False):
+
+        """
+        Reports the simulated time taken for the system to reach steady-state.
+
+        :param chop: Whether the simulation was running with chopped heat flow rather than steady. Default is False.
+        """
+
+        if self._times is None:
+            raise ValueError("Data has not been loaded.")
+        if not chop:
+            print(f"Simulation converged in {self._times[-1]:.3f}s.")
+            return
+        raise NotImplementedError("Haven't implemented convergence time for chopper simulations.")
+    
+
+    def report_final_avg_temp(self):
+
+        """
+        Reports the final average temperature of the system. Only makes sense for systems that reached steady-state.
+        """
+
+        if self._temps is None:
+            raise ValueError("Data has not been loaded.")
+        avg_temp: float = np.average(self._temps[-1])
+        print(f"Final average temperature of the system was {avg_temp:.3f}K.")
+
+
     def close(self):
 
         if self._file is not None:
