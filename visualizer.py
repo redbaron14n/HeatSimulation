@@ -49,32 +49,20 @@ def time_evolution_plot(data: DataHandler):
 
 def front_and_back_temp_plot(data: DataHandler):
 
-    times = data.times
-    temps = data.temps[:, np.array([0, -1])]
-
     _fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_title("Temperature Evolution at Front and Rear of Sample")
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Temperature [K]")
 
-    front = temps[:, 0]
-    rear = temps[:, 1]
+    ax.plot(data.times, data.temps[:, 0], label="Front")
+    ax.scatter(data.minima[0][:, 0], data.minima[0][:, 1], color="Blue", s=20, zorder=5, marker="x")
+    ax.scatter(data.maxima[0][:, 0], data.maxima[0][:, 1], color="Purple", s=20, zorder=5, marker="x")
 
-    front_min_mask = (front[1:-1] < front[:-2]) & (front[1:-1] < front[2:])
-    front_min_indices = np.where(front_min_mask)[0]+1
-    front_min_temps = front[front_min_indices]
-    front_min_times = times[front_min_indices]
-    ax.scatter(front_min_times, front_min_temps, color="Blue", s=20, zorder=5, marker="x")
+    ax.plot(data.times, data.temps[:, -1], label="Rear")
+    ax.scatter(data.minima[-1][:, 0], data.minima[-1][:, 1], color="Red", s=20, zorder=5, marker="x")
+    ax.scatter(data.maxima[-1][:, 0], data.maxima[-1][:, 1], color="Yellow", s=20, zorder=5, marker="x")
 
-    rear_min_mask = (rear[1:-1] < rear[:-2]) & (rear[1:-1] < rear[2:])
-    rear_min_indices = np.where(rear_min_mask)[0]+1
-    rear_min_temps = rear[rear_min_indices]
-    rear_min_times = times[rear_min_indices]
-    ax.scatter(rear_min_times, rear_min_temps, color="Red", s=20, zorder=5, marker="x")
-
-    ax.plot(times, front, label="Front")
-    ax.plot(times, rear, label="Rear")
-
+    temps = data.temps[:, np.array([0, -1])]
     min_temp = np.min(temps)
     max_temp = np.max(temps)
     temp_diff = max_temp - min_temp

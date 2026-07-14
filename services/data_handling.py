@@ -28,6 +28,8 @@ class DataHandler():
         self._temps: NDArray[np.float64] | None = None
         self._init_temps: NDArray[np.float64] | None = None
         self._length: float | None = None
+        self._minima: list[NDArray[np.float64]] | None = None
+        self._maxima: list[NDArray[np.float64]] | None = None
 
         self._file: File | None = None
 
@@ -101,6 +103,22 @@ class DataHandler():
         if self._length is None:
             raise ValueError("No data has been loaded.")
         return self._length
+    
+
+    @property
+    def minima(self) -> list[NDArray[np.float64]]:
+
+        if self._minima is None:
+            raise ValueError("No data has been loaded.")
+        return self._minima
+    
+
+    @property
+    def maxima(self) -> list[NDArray[np.float64]]:
+
+        if self._maxima is None:
+            raise ValueError("No data has been loaded.")
+        return self._maxima
 
 
     ########################################
@@ -119,6 +137,32 @@ class DataHandler():
             elif response.lower() not in ["y", "n"]:
                 invalid = True
                 print("Unknown input. Try again.")
+
+
+    def _set_minmax(self):
+
+        if (self._times is None) or (self._temps is None):
+            raise ValueError("Data has not been loaded.")
+        self._minima = []
+        self._min_indices: list[NDArray[np.int64]] = []
+        self._maxima = []
+        self._max_indices: list[NDArray[np.int64]] = []
+        for i in range(self._temps.shape[1]):
+            temps = self._temps[:, i]
+
+            min_mask = (temps[1:-1] < temps[:-2]) & (temps[1:-1] < temps[2:])
+            min_indices = (np.where(min_mask)[0]+1).astype(np.int64)
+            self._min_indices.append(min_indices)
+            min_temps = temps[min_indices]
+            min_times = self._times[min_indices]
+            self._minima.append(np.column_stack((min_times, min_temps)))
+
+            max_mask = (temps[1:-1] > temps[:-2]) & (temps[1:-1] > temps[2:])
+            max_indices = (np.where(max_mask)[0]+1).astype(np.int64)
+            self._max_indices.append(max_indices)
+            max_temps = temps[max_indices]
+            max_times = self._times[max_indices]
+            self._maxima.append(np.column_stack((max_times, max_temps)))
 
 
     ########################################
@@ -177,6 +221,7 @@ class DataHandler():
             self._cond = cast(float, f.attrs["cond"])
             self._temp_ambient = cast(float, f.attrs["temp_ambient"])
             self._init_temps = np.array(f.attrs["init_temps"], dtype=np.float64)
+            self._set_minmax()
         print("Successfully loaded data.")
 
 
@@ -234,6 +279,12 @@ class DataHandler():
             raise ValueError("Data has not been loaded.")
         avg_temp: float = np.average(self._temps[-1])
         print(f"Final average temperature of the system was {avg_temp:.3f}K.")
+
+
+    def report_lag_time(self):
+
+        if (self._temps is None) or (self._times is None):
+            raise ValueError("Data has not been loaded.")
 
 
     def close(self):
