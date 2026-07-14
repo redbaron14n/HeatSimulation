@@ -104,6 +104,24 @@ class DataHandler():
 
 
     ########################################
+    # Private Methods
+    ########################################
+
+
+    def _confirm_overwrite(self):
+
+        invalid = True
+        while invalid:
+            invalid = False
+            response = input(f"Pre-existing file {str(self._filepath)} detected. Confirm overwrite (y/n)? ")
+            if response.lower() == "n":
+                raise RuntimeError("Simulation aborted by user.")
+            elif response.lower() not in ["y", "n"]:
+                invalid = True
+                print("Unknown input. Try again.")
+
+
+    ########################################
     # Public Methods
     ########################################
 
@@ -117,6 +135,8 @@ class DataHandler():
         :param metadata: A dictionary mapping simulation inputs to attribute names.
         """
 
+        if self._filepath.exists():
+            self._confirm_overwrite()
         self._file = File(str(self._filepath), "w")
         self._file.create_dataset(
             name="times",
