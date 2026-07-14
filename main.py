@@ -45,12 +45,11 @@ def print_reports(data: DataHandler):
 
     data.report_convergence_time()
     data.report_final_avg_temp()
-    # data.report_lag_time()
+    data.report_lag_time()
 
 
-filename = "saving_test.hdf5"
-run_configuration(filename, K10L3_TRIAL, 0.003, GAS_2200_CONSTANT_ARRAY, HTCS_100_5_50_2_300_ARRAY, 3.0, max_sim_time=200., force_overwrite=True)
-init_temps = get_final_temps(filename)
+filename = "Biot_hh100_hl5_k10_l12.hdf5"
+# run_configuration(filename, K10_TRIAL, 0.012, GAS_2200_CONSTANT_ARRAY, HTCS_100_5_50_2_300_ARRAY, 3.0, max_sim_time=300., force_overwrite=True)
 
 data = DataHandler(filename)
 data.load_data()

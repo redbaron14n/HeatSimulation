@@ -510,7 +510,7 @@ class FiniteDiffSolver1D:
         temps = self._init_temps
         self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
         file.initialize_storage((self._x_res,), self._construct_metadata(), force_overwrite)
-        times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
+        times = np.arange(self._tick_count+1, dtype=np.float64) * self._t_step
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         saved = 0
         if save_evo:

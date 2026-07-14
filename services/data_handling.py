@@ -12,7 +12,8 @@ import numpy as np
 
 DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
-CHOP_CONV_TOL = 1e-3
+CHOP_CONV_WINDOW = 5
+CHOP_CONV_TOL = 1e-2
 
 
 class DataHandler():
@@ -189,15 +190,13 @@ class DataHandler():
 
         if self._chops is None:
             raise ValueError("No data has been loaded.")
-        if self._chops.shape[0] == 1:
-            raise ValueError("Only one chop cycle is detected. No information on steady-state.")
-        for i in range(1, self._chops.shape[0]):
-            if (
-                abs(self._chops[i, 0, 1] - self._chops[i-1, 0, 1]) <= CHOP_CONV_TOL and
-                abs(self._chops[i, 1, 1] - self._chops[i-1, 1, 1]) <= CHOP_CONV_TOL and
-                abs(self._chops[i, 2, 1] - self._chops[i-1, 2, 1]) <= CHOP_CONV_TOL and
-                abs(self._chops[i, 3, 1] - self._chops[i-1, 3, 1]) <= CHOP_CONV_TOL
-            ):
+        n = self._chops.shape[0]
+        if n < CHOP_CONV_WINDOW + 1:
+            raise ValueError(f"At least {CHOP_CONV_WINDOW+1} cycles are needed for convergence testing. Current data contains only {n}.")
+        for i in range(2*CHOP_CONV_WINDOW-1, n):
+            prev = self._chops[i-CHOP_CONV_WINDOW:i, :, 1].mean(axis=0)
+            curr = self._chops[i-CHOP_CONV_WINDOW+1:i+1, :, 1].mean(axis=0)
+            if np.all(np.abs(curr - prev) <= CHOP_CONV_TOL):
                 return i
         raise RuntimeError("Chop simulation did not reach steady-state. Either run simulation longer or lower chop convergence tolerance constant.")
 
@@ -325,7 +324,7 @@ class DataHandler():
         if self._chops is None:
             raise ValueError("Data has not been loaded.")
         index = self._find_chop_steady_index()
-        f_max_time, f_max_temp = self._chops[index, 0, 0], self._chops[index, 0, 1]
+        f_max_time, f_max_temp = self._chops[index+1, 0, 0], self._chops[index+1, 0, 1]
         r_max_time, r_max_temp = self._chops[index, 1, 0], self._chops[index, 1, 1]
         f_min_time, f_min_temp = self._chops[index, 2, 0], self._chops[index, 2, 1]
         r_min_time, r_min_temp = self._chops[index, 3, 0], self._chops[index, 3, 1]
