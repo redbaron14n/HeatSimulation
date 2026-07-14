@@ -18,6 +18,7 @@ def run_configuration(
         init_temps: NDArray[np.float64] | None = None,
         min_sim_time: float = 5.,
         max_sim_time: float = 50.,
+        force_overwrite: bool = False
 ):
     
     diff, cond, emis = material
@@ -28,7 +29,7 @@ def run_configuration(
     if period != 0.:
         solver.gas_temperatures = solver.create_chop_schedule(gas_temp_kernel, period, max_sim_time)
         solver.heat_transfer_coefs = solver.create_chop_schedule(htcs_kernel, period, max_sim_time)
-    solver.run_simulation(filename)
+    solver.run_simulation(filename, force_overwrite=force_overwrite)
 
 
 def get_final_temps(filename: str) -> NDArray[np.float64]:
@@ -44,12 +45,12 @@ def print_reports(data: DataHandler):
 
     data.report_convergence_time()
     data.report_final_avg_temp()
-    data.report_lag_time()
+    # data.report_lag_time()
 
 
-filename = "copper_hvaf15in_3s_chop.hdf5"
-# init_temps = get_final_temps("copper_steadystate_hvaf15in.hdf5")
-# run_configuration(filename, COPPER, 0.0035, GAS_2200_CONSTANT_ARRAY, HTCS_300_10_5_300_ARRAY, 3.0, init_temps=init_temps, max_sim_time=100)
+filename = "saving_test.hdf5"
+run_configuration(filename, K10L3_TRIAL, 0.003, GAS_2200_CONSTANT_ARRAY, HTCS_100_5_50_2_300_ARRAY, 3.0, max_sim_time=200., force_overwrite=True)
+init_temps = get_final_temps(filename)
 
 data = DataHandler(filename)
 data.load_data()

@@ -485,7 +485,8 @@ class FiniteDiffSolver1D:
             print_every: int = 100000,
             save_tol: float = 0.01,
             time_tol: float = 1e-3,
-            chunk_size: int = 1000
+            chunk_size: int = 1000,
+            force_overwrite: bool = False
     ):
 
         """
@@ -499,6 +500,7 @@ class FiniteDiffSolver1D:
         :param print_every: The interval at which to print the simulation progress. Default is 1000. 0 means no printing.
         :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
         :param chunk_size: How many distributions to calculate before saving.
+        :param force_overwrite: Whether or not to force overwriting files for batch solving. Default is False.
         """
 
         file = DataHandler(filename)
@@ -507,7 +509,7 @@ class FiniteDiffSolver1D:
             self._init_temps = file.init_temps
         temps = self._init_temps
         self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
-        file.initialize_storage((self._x_res,), self._construct_metadata())
+        file.initialize_storage((self._x_res,), self._construct_metadata(), force_overwrite)
         times = np.arange(0, self._max_time + self._t_step, self._t_step, dtype=np.float64)
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
         saved = 0

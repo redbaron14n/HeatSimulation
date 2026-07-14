@@ -207,16 +207,17 @@ class DataHandler():
     ########################################
 
 
-    def initialize_storage(self, resolution: tuple[int, ...], metadata: dict[str, int | float | NDArray[np.float64]]):
+    def initialize_storage(self, resolution: tuple[int, ...], metadata: dict[str, int | float | NDArray[np.float64]], push_overwrite: bool=False):
 
         """
         Preps for storage of simulation data.
 
         :param resolution: A tuple of integers corresponding to the spatial resolution of the temperature data.
         :param metadata: A dictionary mapping simulation inputs to attribute names.
+        :param push_overwrite: Automatically force overwrite for batch solving. Default is False.
         """
 
-        if self._filepath.exists():
+        if self._filepath.exists() and not push_overwrite:
             self._confirm_overwrite()
         self._file = File(str(self._filepath), "w")
         self._file.create_dataset(
