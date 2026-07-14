@@ -12,7 +12,7 @@ import numpy as np
 
 DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
-CHOP_CONV_TOL = 0.02
+CHOP_CONV_TOL = 1e-3
 
 
 class DataHandler():
@@ -31,6 +31,7 @@ class DataHandler():
         self._length: float | None = None
         self._minima: list[NDArray[np.float64]] | None = None
         self._maxima: list[NDArray[np.float64]] | None = None
+        self._chops: NDArray[np.float64] | None = None
 
         self._file: File | None = None
 
@@ -166,29 +167,39 @@ class DataHandler():
             self._maxima.append(np.column_stack((max_times, max_temps)))
 
 
+    def _set_chops(self):
+
+        if (self._maxima is None) or (self._minima is None) or (self._temps is None):
+            raise ValueError("No data has been loaded.")
+        num_chop = min(self._maxima[0].shape[0]+1, self._maxima[-1].shape[0], self._minima[0].shape[0], self._minima[-1].shape[0])
+        self._chops = np.empty((num_chop, 4, 2), dtype=np.float64)
+        indx = 0
+        while indx < num_chop:
+            if indx == 0:
+                self._chops[0, 0] = np.array([0., self._temps[0, 0]])
+            else:
+                self._chops[indx, 0] = self._maxima[0][indx-1]
+            self._chops[indx, 1] = self._maxima[-1][indx]
+            self._chops[indx, 2] = self._minima[0][indx]
+            self._chops[indx, 3] = self._minima[-1][indx]
+            indx += 1
+
+
     def _find_chop_steady_index(self) -> int:
 
-        if (self._maxima is None) or (self._minima is None):
+        if self._chops is None:
             raise ValueError("No data has been loaded.")
-        extrema_shapes = (self._maxima[0].shape, self._maxima[-1][1:].shape, self._minima[0][1:].shape, self._minima[-1][1:].shape)
-        if not all(t == self._maxima[0].shape for t in extrema_shapes):
-            raise ValueError(f"Extrema are misaligned with shapes {extrema_shapes}.")
-        indx = 0
-        converged = False
-        while not converged:
-            converged = True
-            indx += 1
-            if indx == self._maxima[0].shape[0]:
-                raise RuntimeError("Chop simulation does not converge. Run it for longer or increase chop convergence tolerance constant.")
-            if abs(self._maxima[0][indx-1, 1] - self._maxima[0][indx, 1]) > CHOP_CONV_TOL:
-                converged = False
-            elif abs(self._maxima[-1][indx-1, 1] - self._maxima[-1][indx, 1]) > CHOP_CONV_TOL:
-                converged = False
-            elif abs(self._minima[0][indx-1, 1] - self._minima[0][indx, 1]) > CHOP_CONV_TOL:
-                converged = False
-            elif abs(self._minima[-1][indx-1, 1] - self._minima[-1][indx, 1]) > CHOP_CONV_TOL:
-                converged = False
-        return indx
+        if self._chops.shape[0] == 1:
+            raise ValueError("Only one chop cycle is detected. No information on steady-state.")
+        for i in range(1, self._chops.shape[0]):
+            if (
+                abs(self._chops[i, 0, 1] - self._chops[i-1, 0, 1]) <= CHOP_CONV_TOL and
+                abs(self._chops[i, 1, 1] - self._chops[i-1, 1, 1]) <= CHOP_CONV_TOL and
+                abs(self._chops[i, 2, 1] - self._chops[i-1, 2, 1]) <= CHOP_CONV_TOL and
+                abs(self._chops[i, 3, 1] - self._chops[i-1, 3, 1]) <= CHOP_CONV_TOL
+            ):
+                return i
+        raise RuntimeError("Chop simulation did not reach steady-state. Either run simulation longer or lower chop convergence tolerance constant.")
 
 
     ########################################
@@ -248,6 +259,7 @@ class DataHandler():
             self._temp_ambient = cast(float, f.attrs["temp_ambient"])
             self._init_temps = np.array(f.attrs["init_temps"], dtype=np.float64)
             self._set_minmax()
+            self._set_chops()
         print("Successfully loaded data.")
 
 
@@ -309,13 +321,13 @@ class DataHandler():
 
     def report_lag_time(self):
 
-        if (self._temps is None) or (self._times is None) or (self._maxima is None) or (self._minima is None):
+        if self._chops is None:
             raise ValueError("Data has not been loaded.")
         index = self._find_chop_steady_index()
-        f_max_time, f_max_temp = self._maxima[0][index]
-        f_min_time, f_min_temp = self._minima[0][index+1]
-        r_max_time, r_max_temp = self._maxima[-1][index+1]
-        r_min_time, r_min_temp = self._minima[-1][index+1]
+        f_max_time, f_max_temp = self._chops[index, 0, 0], self._chops[index, 0, 1]
+        r_max_time, r_max_temp = self._chops[index, 1, 0], self._chops[index, 1, 1]
+        f_min_time, f_min_temp = self._chops[index, 2, 0], self._chops[index, 2, 1]
+        r_min_time, r_min_temp = self._chops[index, 3, 0], self._chops[index, 3, 1]
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
         print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
