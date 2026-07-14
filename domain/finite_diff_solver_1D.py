@@ -418,15 +418,15 @@ class FiniteDiffSolver1D:
             chunk_size: int
     ) -> int:
         
-        rms_last = np.sqrt(((new_temps - buffer.last_saved)**2).mean()) # pyright: ignore[reportPossiblyUnboundVariable]
-        if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or converged:
-            buffer.times.append(time) # pyright: ignore[reportPossiblyUnboundVariable]
-            buffer.temps.append(new_temps) # pyright: ignore[reportPossiblyUnboundVariable]
+        rms_last = np.sqrt(((new_temps - buffer.last_saved)**2).mean())
+        if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or converged or (time >= self._max_time):
+            buffer.times.append(time)
+            buffer.temps.append(new_temps)
             buffer.last_saved = new_temps
             buffer.last_saved_time = time
             saved += 1
-            buffer.size += 1 # pyright: ignore[reportPossiblyUnboundVariable]
-        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or converged: # pyright: ignore[reportPossiblyUnboundVariable]
+            buffer.size += 1
+        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or converged or (time >= self._max_time):
             file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
             buffer.times.clear()
             buffer.temps.clear()
