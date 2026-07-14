@@ -44,15 +44,16 @@ def print_reports(data: DataHandler):
 
     data.report_convergence_time()
     data.report_final_avg_temp()
+    data.report_lag_time()
 
 
-filename = "copper_hvaf15in_3s_chop"
-init_temps = get_final_temps("copper_steadystate_hvaf15in.hdf5")
-run_configuration(filename, COPPER, 0.0035, GAS_2200_CONSTANT_ARRAY, HTCS_300_10_5_300_ARRAY, 3.0, init_temps=init_temps, max_sim_time=100)
+filename = "copper_hvaf15in_3s_chop.hdf5"
+# init_temps = get_final_temps("copper_steadystate_hvaf15in.hdf5")
+# run_configuration(filename, COPPER, 0.0035, GAS_2200_CONSTANT_ARRAY, HTCS_300_10_5_300_ARRAY, 3.0, init_temps=init_temps, max_sim_time=100)
 
 data = DataHandler(filename)
 data.load_data()
+print_reports(data)
 time_evolution_plot(data)
 front_and_back_temp_plot(data)
-print_reports(data)
 data.close()

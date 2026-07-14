@@ -12,6 +12,7 @@ import numpy as np
 
 DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
+CHOP_CONV_TOL = 0.02
 
 
 class DataHandler():
@@ -165,6 +166,31 @@ class DataHandler():
             self._maxima.append(np.column_stack((max_times, max_temps)))
 
 
+    def _find_chop_steady_index(self) -> int:
+
+        if (self._maxima is None) or (self._minima is None):
+            raise ValueError("No data has been loaded.")
+        extrema_shapes = (self._maxima[0].shape, self._maxima[-1][1:].shape, self._minima[0][1:].shape, self._minima[-1][1:].shape)
+        if not all(t == self._maxima[0].shape for t in extrema_shapes):
+            raise ValueError(f"Extrema are misaligned with shapes {extrema_shapes}.")
+        indx = 0
+        converged = False
+        while not converged:
+            converged = True
+            indx += 1
+            if indx == self._maxima[0].shape[0]:
+                raise RuntimeError("Chop simulation does not converge. Run it for longer or increase chop convergence tolerance constant.")
+            if abs(self._maxima[0][indx-1, 1] - self._maxima[0][indx, 1]) > CHOP_CONV_TOL:
+                converged = False
+            elif abs(self._maxima[-1][indx-1, 1] - self._maxima[-1][indx, 1]) > CHOP_CONV_TOL:
+                converged = False
+            elif abs(self._minima[0][indx-1, 1] - self._minima[0][indx, 1]) > CHOP_CONV_TOL:
+                converged = False
+            elif abs(self._minima[-1][indx-1, 1] - self._minima[-1][indx, 1]) > CHOP_CONV_TOL:
+                converged = False
+        return indx
+
+
     ########################################
     # Public Methods
     ########################################
@@ -283,8 +309,16 @@ class DataHandler():
 
     def report_lag_time(self):
 
-        if (self._temps is None) or (self._times is None):
+        if (self._temps is None) or (self._times is None) or (self._maxima is None) or (self._minima is None):
             raise ValueError("Data has not been loaded.")
+        index = self._find_chop_steady_index()
+        f_max_time, f_max_temp = self._maxima[0][index]
+        f_min_time, f_min_temp = self._minima[0][index+1]
+        r_max_time, r_max_temp = self._maxima[-1][index+1]
+        r_min_time, r_min_temp = self._minima[-1][index+1]
+        print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
+        print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
+        print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
 
 
     def close(self):
