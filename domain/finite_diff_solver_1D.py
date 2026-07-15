@@ -26,6 +26,7 @@ class FiniteDiffSolver1D:
             initial_temps: NDArray[np.float64] | None = None,
             gas_temps: NDArray[np.float64] = np.array([[0.0, 298.15, 298.15]]),
             htcs: NDArray[np.float64] = np.array([[0.0, 100., 100.]], dtype=np.float64),
+            period: float = 0.,
             ambient_temp: float = 298.15,
             spatial_res: int = 25,
             min_sim_time: float = 0.0,
@@ -38,6 +39,7 @@ class FiniteDiffSolver1D:
         :param initial_temps: The initial temperatures for the finite difference grid [K]. Default is None, which will initialize based on the system's ambient temperature.
         :param gas_temps: The temperatures of the gas at the boundaries [K]. The first column is time and the second and third columns are the new constant gas temperatures introduced at that time. Default is room temperature (298.15 K) on both sides.
         :param htcs: The heat transfer coefficients [W/m^2/K] at the boundaries. The first column is time and the second and third columns are the new constant coefficients introduced at that time. Default is 100 on both sides.
+        :param period: The period of the chop settings in seconds. Default is 0 corresponding to no chopping.
         :param ambient_temp: The ambient temperature for the simulation [K].
         :param spatial_res: The number of spatial points to use in the finite difference grid.
         :param min_sim_time: The minimum simulation time to run the solver for [s].
@@ -48,6 +50,7 @@ class FiniteDiffSolver1D:
         self.system = system
         self.gas_temperatures = gas_temps
         self.heat_transfer_coefs = htcs
+        self.period = period
         self.ambient_temperature = ambient_temp
         self.spatial_resolution = spatial_res
         self.initial_temperatures = initial_temps
@@ -120,6 +123,24 @@ class FiniteDiffSolver1D:
         if not np.all(htcs[:, 1:] >= 0.):
             raise ValueError("All given heat transfer coefficients must be non-negative.")
         self._htcs = htcs
+
+
+    @property
+    def period(self) -> float:
+
+        """
+        :return: The period of the chop settings in seconds.
+        """
+
+        return self._period
+    
+
+    @period.setter
+    def period(self, period: float):
+
+        if period < 0:
+            raise ValueError("Period of chops must be non-negative.")
+        self._period = period
 
 
     @property
@@ -400,7 +421,8 @@ class FiniteDiffSolver1D:
             "emis": self._system.emissivities,
             "htcs": self._htcs,
             "gas_temps": self._gas_temps,
-            "init_temps": self._init_temps
+            "init_temps": self._init_temps,
+            "period": self._period
         }
         return metadata
     
@@ -439,14 +461,12 @@ class FiniteDiffSolver1D:
     ########################################
 
 
-    def create_chop_schedule(self, array_map: NDArray[np.float64], period: float, max_time: float) -> NDArray[np.float64]:
+    def create_chop_schedule(self, array_map: NDArray[np.float64]) -> NDArray[np.float64]:
 
         """
         Given a 2D array of floats, returns a longer repeating version where the first column is increasing each repetition by 'period' until 'max_time' is reached.
 
         :param array_map: The 2D array of floats mapping gas temperatures or heat transfer coefficients to simulation time.
-        :param period: By how much each unit array's time values should increaase each time they repeat.
-        :param max_time: Determines how many repetitions should be made. The final row will have first column less than this value.
 
         :return: The lengthed periodic 2D array.
         """
@@ -458,21 +478,21 @@ class FiniteDiffSolver1D:
         if len(np.unique(array_map[:, 0])) < len(array_map[:, 0]):
             raise ValueError("All entries in the first column of the array must be unique.")
         array_map = array_map[array_map[:, 0].argsort()]
-        if period <= array_map[-1, 0]:
-            raise ValueError(f"Period must be greater than the greatest entry in the first column, but {period} <= {array_map[-1, 0]}.")
-        if max_time <= period:
-            raise ValueError(f"The max time must be greater than the given period, but {max_time} <= {period}.")
+        if self._period <= array_map[-1, 0]:
+            raise ValueError(f"Period must be greater than the greatest entry in the first column, but {self._period} <= {array_map[-1, 0]}.")
+        if self._max_time <= self._period:
+            raise ValueError(f"The max time must be greater than the given period, but {self._max_time} <= {self._period}.")
         
-        n_repeats = float(np.floor(max_time / period))
+        n_repeats = float(np.floor(self._max_time / self._period))
         blocks: list[NDArray[np.float64]] = []
         i = 0.
         while i <= n_repeats:
             block = array_map.copy()
-            block[:, 0] += i * period
+            block[:, 0] += i * self._period
             blocks.append(block)
             i += 1
         result = np.vstack(blocks)
-        return result[result[:, 0] < max_time]
+        return result[result[:, 0] < self._max_time]
 
 
     def run_simulation(

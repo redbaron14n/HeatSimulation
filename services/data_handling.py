@@ -14,6 +14,7 @@ DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
 CHOP_CONV_WINDOW = 5
 CHOP_CONV_TOL = 1e-2
+CYCLE_WINDOW = (-0.1, 0.9)
 
 
 class DataHandler():
@@ -258,6 +259,7 @@ class DataHandler():
             self._cond = cast(float, f.attrs["cond"])
             self._temp_ambient = cast(float, f.attrs["temp_ambient"])
             self._init_temps = np.array(f.attrs["init_temps"], dtype=np.float64)
+            self._period = cast(float, f.attrs["period"])
             self._set_minmax()
             self._set_chops()
         print("Successfully loaded data.")
