@@ -14,7 +14,7 @@ DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
 CHOP_CONV_WINDOW = 5
 CHOP_CONV_TOL = 1e-2
-CYCLE_WINDOW = (-0.1, 0.9)
+CYCLE_WINDOW = (-0.1, 0.5)
 
 
 class DataHandler():
@@ -31,9 +31,7 @@ class DataHandler():
         self._temps: NDArray[np.float64] | None = None
         self._init_temps: NDArray[np.float64] | None = None
         self._length: float | None = None
-        self._minima: list[NDArray[np.float64]] | None = None
-        self._maxima: list[NDArray[np.float64]] | None = None
-        self._chops: NDArray[np.float64] | None = None
+        self._extrema: NDArray[np.float64] | None
 
         self._file: File | None = None
 
@@ -110,19 +108,11 @@ class DataHandler():
     
 
     @property
-    def minima(self) -> list[NDArray[np.float64]]:
+    def extrema(self) -> NDArray[np.float64]:
 
-        if self._minima is None:
-            raise ValueError("No data has been loaded.")
-        return self._minima
-    
-
-    @property
-    def maxima(self) -> list[NDArray[np.float64]]:
-
-        if self._maxima is None:
-            raise ValueError("No data has been loaded.")
-        return self._maxima
+        if self._extrema is None:
+            raise RuntimeError("Data has not been loaded.")
+        return self._extrema
 
 
     ########################################
@@ -143,60 +133,43 @@ class DataHandler():
                 print("Unknown input. Try again.")
 
 
-    def _set_minmax(self):
+    def _set_extrema(self):
 
         if (self._times is None) or (self._temps is None):
             raise ValueError("Data has not been loaded.")
-        self._minima = []
-        self._min_indices: list[NDArray[np.int64]] = []
-        self._maxima = []
-        self._max_indices: list[NDArray[np.int64]] = []
-        for i in range(self._temps.shape[1]):
-            temps = self._temps[:, i]
+        extrema: list[NDArray[np.float64]] = []
+        max_time: float = max(self._times)
+        cycles = int(max_time // self._period)
+        for i in range(cycles):
+            tmin = max(0., (i+CYCLE_WINDOW[0])*self._period)
+            imin = np.searchsorted(self._times, tmin, side="left")
+            tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
+            imax = np.searchsorted(self._times, tmax, side="right")
+            temps = self._temps[imin:imax]
+            
+            temp_mins = temps.min(axis=0)
+            time_mins = self._times[temps.argmin(axis=0)+imin]
+            mins = np.column_stack((time_mins, temp_mins))
 
-            min_mask = (temps[1:-1] < temps[:-2]) & (temps[1:-1] < temps[2:])
-            min_indices = (np.where(min_mask)[0]+1).astype(np.int64)
-            self._min_indices.append(min_indices)
-            min_temps = temps[min_indices]
-            min_times = self._times[min_indices]
-            self._minima.append(np.column_stack((min_times, min_temps)))
+            temp_maxs = temps.max(axis=0)
+            time_maxs = self._times[temps.argmax(axis=0)+imin]
+            maxs = np.column_stack((time_maxs, temp_maxs))
 
-            max_mask = (temps[1:-1] > temps[:-2]) & (temps[1:-1] > temps[2:])
-            max_indices = (np.where(max_mask)[0]+1).astype(np.int64)
-            self._max_indices.append(max_indices)
-            max_temps = temps[max_indices]
-            max_times = self._times[max_indices]
-            self._maxima.append(np.column_stack((max_times, max_temps)))
-
-
-    def _set_chops(self):
-
-        if (self._maxima is None) or (self._minima is None) or (self._temps is None):
-            raise ValueError("No data has been loaded.")
-        num_chop = min(self._maxima[0].shape[0]+1, self._maxima[-1].shape[0], self._minima[0].shape[0], self._minima[-1].shape[0])
-        self._chops = np.empty((num_chop, 4, 2), dtype=np.float64)
-        indx = 0
-        while indx < num_chop:
-            if indx == 0:
-                self._chops[0, 0] = np.array([0., self._temps[0, 0]])
-            else:
-                self._chops[indx, 0] = self._maxima[0][indx-1]
-            self._chops[indx, 1] = self._maxima[-1][indx]
-            self._chops[indx, 2] = self._minima[0][indx]
-            self._chops[indx, 3] = self._minima[-1][indx]
-            indx += 1
+            cycle_extrema = np.column_stack((mins, maxs))
+            extrema.append(cycle_extrema)
+        self._extrema = np.array(extrema)
 
 
     def _find_chop_steady_index(self) -> int:
 
-        if self._chops is None:
-            raise ValueError("No data has been loaded.")
-        n = self._chops.shape[0]
+        if self._extrema is None:
+            raise RuntimeError("No data has been loaded.")
+        n: int = self._extrema.shape[0]
         if n < CHOP_CONV_WINDOW + 1:
             raise ValueError(f"At least {CHOP_CONV_WINDOW+1} cycles are needed for convergence testing. Current data contains only {n}.")
-        for i in range(2*CHOP_CONV_WINDOW-1, n):
-            prev = self._chops[i-CHOP_CONV_WINDOW:i, :, 1].mean(axis=0)
-            curr = self._chops[i-CHOP_CONV_WINDOW+1:i+1, :, 1].mean(axis=0)
+        for i in range(CHOP_CONV_WINDOW, n):
+            prev = self._extrema[i-CHOP_CONV_WINDOW:i, :, [1, 3]].mean(axis=1)
+            curr = self._extrema[i-CHOP_CONV_WINDOW+1:i+1, :, [1, 3]].mean(axis=1)
             if np.all(np.abs(curr - prev) <= CHOP_CONV_TOL):
                 return i
         raise RuntimeError("Chop simulation did not reach steady-state. Either run simulation longer or lower chop convergence tolerance constant.")
@@ -260,8 +233,7 @@ class DataHandler():
             self._temp_ambient = cast(float, f.attrs["temp_ambient"])
             self._init_temps = np.array(f.attrs["init_temps"], dtype=np.float64)
             self._period = cast(float, f.attrs["period"])
-            self._set_minmax()
-            self._set_chops()
+            self._set_extrema()
         print("Successfully loaded data.")
 
 
@@ -323,13 +295,11 @@ class DataHandler():
 
     def report_lag_time(self):
 
-        if self._chops is None:
+        if self._extrema is None:
             raise ValueError("Data has not been loaded.")
         index = self._find_chop_steady_index()
-        f_max_time, f_max_temp = self._chops[index+1, 0, 0], self._chops[index+1, 0, 1]
-        r_max_time, r_max_temp = self._chops[index, 1, 0], self._chops[index, 1, 1]
-        f_min_time, f_min_temp = self._chops[index, 2, 0], self._chops[index, 2, 1]
-        r_min_time, r_min_temp = self._chops[index, 3, 0], self._chops[index, 3, 1]
+        f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0])
+        r_min_time, r_min_temp, r_max_time, r_max_temp = tuple(self._extrema[index, -1])
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
         print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")

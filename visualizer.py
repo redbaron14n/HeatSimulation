@@ -55,12 +55,12 @@ def front_and_back_temp_plot(data: DataHandler):
     ax.set_ylabel("Temperature [K]")
 
     ax.plot(data.times, data.temps[:, 0], label="Front")
-    ax.scatter(data.minima[0][:, 0], data.minima[0][:, 1], color="Blue", s=20, zorder=5, marker="x")
-    ax.scatter(data.maxima[0][:, 0], data.maxima[0][:, 1], color="Purple", s=20, zorder=5, marker="x")
+    ax.scatter(data.extrema[:, 0, 0], data.extrema[:, 0, 1], color="Blue", s=20, zorder=5, marker="x")
+    ax.scatter(data.extrema[:, 0, 2], data.extrema[:, 0, 3], color="Purple", s=20, zorder=5, marker="x")
 
     ax.plot(data.times, data.temps[:, -1], label="Rear")
-    ax.scatter(data.minima[-1][:, 0], data.minima[-1][:, 1], color="Red", s=20, zorder=5, marker="x")
-    ax.scatter(data.maxima[-1][:, 0], data.maxima[-1][:, 1], color="Yellow", s=20, zorder=5, marker="x")
+    ax.scatter(data.extrema[:, -1, 0], data.extrema[:, -1, 1], color="Red", s=20, zorder=5, marker="x")
+    ax.scatter(data.extrema[:, -1, 2], data.extrema[:, -1, 3], color="Yellow", s=20, zorder=5, marker="x")
 
     temps = data.temps[:, np.array([0, -1])]
     min_temp = np.min(temps)
