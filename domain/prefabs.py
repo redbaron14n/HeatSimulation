@@ -51,7 +51,7 @@ HTCS_100_5_50_2_300_ARRAY = np.array([
 
 COPPER = (9.21e-5, 350., np.array([[400., 0.15], [1000., 0.25]], dtype=np.float64)) # Diffusivity, conductivity, emissivities at temp
 
-STEEL316 = (4.5e-4, 20., np.array([[298.15, 0.32], [750., 0.32], [1200., 0.62]], dtype=np.float64))
+STEEL316 = (4.5e-6, 20., np.array([[298.15, 0.32], [750., 0.32], [1200., 0.62]], dtype=np.float64))
 
 ZRB2 = (2e-5, 74., np.array([[298.15, 0.34]], dtype=np.float64))
 

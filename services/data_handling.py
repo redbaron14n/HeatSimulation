@@ -7,7 +7,7 @@
 from h5py import Dataset, File
 from numpy.typing import NDArray
 from pathlib import Path
-from typing import cast
+from typing import cast, Tuple
 import numpy as np
 
 DIRECTORY = "Data/"
@@ -160,9 +160,9 @@ class DataHandler():
         self._extrema = np.array(extrema)
 
 
-    def _find_chop_steady_index(self) -> int:
+    def _find_chop_steady_index(self) -> Tuple[int, int]:
 
-        if self._extrema is None:
+        if (self._extrema is None) or (self._times is None):
             raise RuntimeError("No data has been loaded.")
         n: int = self._extrema.shape[0]
         if n < CHOP_CONV_WINDOW + 1:
@@ -171,7 +171,8 @@ class DataHandler():
             prev = self._extrema[i-CHOP_CONV_WINDOW:i, :, [1, 3]].mean(axis=1)
             curr = self._extrema[i-CHOP_CONV_WINDOW+1:i+1, :, [1, 3]].mean(axis=1)
             if np.all(np.abs(curr - prev) <= CHOP_CONV_TOL):
-                return i
+                true_i = cast(int, np.searchsorted(self._times, self._extrema[i, 0, 0], side="right"))
+                return i, true_i
         raise RuntimeError("Chop simulation did not reach steady-state. Either run simulation longer or lower chop convergence tolerance constant.")
 
 
@@ -281,15 +282,17 @@ class DataHandler():
         raise NotImplementedError("Haven't implemented convergence time for chopper simulations.")
     
 
-    def report_final_avg_temp(self):
+    def report_final_avg_temp(self, steady_index: int=-1):
 
         """
         Reports the final average temperature of the system. Only makes sense for systems that reached steady-state.
+
+        :param steady_index:
         """
 
         if self._temps is None:
             raise ValueError("Data has not been loaded.")
-        avg_temp: float = np.average(self._temps[-1])
+        avg_temp: float = np.average(self._temps[steady_index:])
         print(f"Final average temperature of the system was {avg_temp:.3f}K.")
 
 
@@ -297,7 +300,8 @@ class DataHandler():
 
         if self._extrema is None:
             raise ValueError("Data has not been loaded.")
-        index = self._find_chop_steady_index()
+        index, abs_index = self._find_chop_steady_index()
+        self.report_final_avg_temp(abs_index)
         f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0])
         r_min_time, r_min_temp, r_max_time, r_max_temp = tuple(self._extrema[index, -1])
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")

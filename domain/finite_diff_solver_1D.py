@@ -393,6 +393,9 @@ class FiniteDiffSolver1D:
 
         gas_data = self._gas_temps
         htcs_data = self._htcs
+        if self._period > 0:
+            gas_data = self.create_chop_schedule(self._gas_temps)
+            htcs_data = self.create_chop_schedule(self._htcs)
         emis_data = self._system.emissivities
 
         gas_temp0_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 1], left=self._ambient_temp)
