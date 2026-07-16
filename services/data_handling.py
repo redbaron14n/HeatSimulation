@@ -14,7 +14,7 @@ DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
 CHOP_CONV_WINDOW = 5
 CHOP_CONV_TOL = 1e-2
-CYCLE_WINDOW = (-0.1, 0.5)
+CYCLE_WINDOW = (-0.1, 0.9)
 
 
 class DataHandler():
@@ -146,16 +146,34 @@ class DataHandler():
             tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
             imax = np.searchsorted(self._times, tmax, side="right")
             temps = self._temps[imin:imax]
-            
-            temp_mins = temps.min(axis=0)
-            time_mins = self._times[temps.argmin(axis=0)+imin]
-            mins = np.column_stack((time_mins, temp_mins))
 
-            temp_maxs = temps.max(axis=0)
-            time_maxs = self._times[temps.argmax(axis=0)+imin]
-            maxs = np.column_stack((time_maxs, temp_maxs))
+            n_points = temps.shape[1]
+            cycle_extrema = np.empty((n_points, 4), dtype=np.float64)
+            for j in range(n_points):
+                col = temps[:, j]
 
-            cycle_extrema = np.column_stack((mins, maxs))
+                # Minimum
+                min_mask = ((col[1:-1] < col[:-2]) & (col[1:-1] < col[2:]))
+                local = np.where(min_mask)[0] + 1
+                if len(local):
+                    min_indx = local[0]
+                else:
+                    min_indx = np.argmin(col)
+                
+                # Maximum
+                max_mask = ((col[1:-1] > col[:-2]) & (col[1:-1] > col[2:]))
+                local = np.where(max_mask)[0] + 1
+                if len(local):
+                    max_indx = local[0]
+                else:
+                    max_indx = np.argmax(col)
+                
+                cycle_extrema[j] = (
+                    self._times[imin + min_indx],
+                    col[min_indx],
+                    self._times[imin + max_indx],
+                    col[max_indx]
+                )
             extrema.append(cycle_extrema)
         self._extrema = np.array(extrema)
 

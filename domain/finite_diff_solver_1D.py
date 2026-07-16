@@ -31,7 +31,8 @@ class FiniteDiffSolver1D:
             spatial_res: int = 25,
             min_sim_time: float = 0.0,
             max_sim_time: float = 100.0,
-            diff_num: float = 0.1
+            diff_num: float = 0.1,
+            max_t_step_size: float = 1e-3
         ):
 
         """
@@ -45,6 +46,7 @@ class FiniteDiffSolver1D:
         :param min_sim_time: The minimum simulation time to run the solver for [s].
         :param max_sim_time: The maximum simulation time to run the solver for [s].
         :param diff_num: The diffusion number (alpha * dt / dx^2) to use for numerical stability.
+        :param max_t_step_size: The maximum time step [s] that may be set. Stability may call for lower, but it may not be greater than this. Default is 1e-3.
         """
 
         self.system = system
@@ -57,6 +59,7 @@ class FiniteDiffSolver1D:
         self.min_simulation_time = min_sim_time
         self.max_simulation_time = max_sim_time
         self.diffusion_number = diff_num
+        self.max_t_step = max_t_step_size
 
 
     ########################################
@@ -259,6 +262,25 @@ class FiniteDiffSolver1D:
         self._update_t_step() # Update t_step based on new diffusion number
 
 
+    @property
+    def max_t_step(self) -> float:
+
+        """
+        :return: The maximum time step [s] allowed by the simulation.
+        """
+
+        return self._max_t_step
+    
+
+    @max_t_step.setter
+    def max_t_step(self, size: float):
+
+        if size <= 0.:
+            raise ValueError("The maximum step size allowed must be positive. Attempted: {size}.")
+        self._max_t_step = size
+        self._update_t_step()
+
+
     ########################################
     # Private Methods
     ########################################
@@ -280,9 +302,14 @@ class FiniteDiffSolver1D:
 
     def _update_t_step(self):
 
-        if not hasattr(self, '_diff_num'):
+        if not hasattr(self, '_max_t_step'):
             return
-        self._t_step = self._diff_num * (self._x_step ** 2) / self._system.diffusivity
+        size = self._diff_num * (self._x_step ** 2) / self._system.diffusivity
+        if size < self._max_t_step:
+            self._t_step = size
+        else:
+            self._t_step = self._max_t_step
+            self._diff_num = self._system.diffusivity * self._max_t_step / (self._x_step**2)
         self._update_tick_count()
 
 
