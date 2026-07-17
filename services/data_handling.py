@@ -327,6 +327,33 @@ class DataHandler():
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
 
 
+    def extract_data(self, entry_row: NDArray[np.float64]):
+
+        """
+        Fills a numpy array row with particular data from the simulation.
+
+        :param entry_row: The 1D numpy array reference to fill out.
+        """
+
+        if len(entry_row.shape) != 1:
+            raise ValueError(f"Inputted array must one-dimensional, but passed array has shape {entry_row.shape}.")
+        if (self._extrema is None) or (self._temps is None):
+            raise RuntimeError("Data has not been loaded.")
+        
+        entry_row[1] = self._cond
+        entry_row[2] = self._diff
+        entry_row[3] = np.max(self._htcs[:, 1])
+        entry_row[4] = self._length
+        entry_row[5] = np.max(self._gas_temps[:, 1])
+        entry_row[6] = self._period
+        entry_row[7] = self._htcs[2, 0] # Chop duration
+
+        cycle_index, abs_index = self._find_chop_steady_index()
+        entry_row[8] = np.average(self._temps[abs_index:])
+        entry_row[9], entry_row[10], entry_row[11], entry_row[12] = tuple(self._extrema[cycle_index, 0])
+        entry_row[13], entry_row[14], entry_row[15], entry_row[16] = tuple(self._extrema[cycle_index, -1])
+
+
     def close(self):
 
         if self._file is not None:

@@ -3,9 +3,32 @@ from domain.finite_diff_solver_1D import FiniteDiffSolver1D
 from domain.prefabs import *
 from itertools import product
 from numpy.typing import NDArray
+from pathlib import Path
 from traceback import print_exc
 from visualizer import *
 import numpy as np
+import pandas as pd
+
+
+BATCH_FMTS = {
+    "Trial": "{:.0f}",
+    "k [W/m/K]": "{:.3g}",
+    "alpha [m^2/s]": "{:.3g}",
+    "h [W/m^2/K]": "{:.3g}",
+    "L [m]": "{:.3g}",
+    "Gas Temp [K]": "{:.3f}",
+    "Chop Duration [s]": "{:.3f}",
+    "Chop Period [s]": "{:.3f}",
+    "Avg Temp [K]": "{:.3f}",
+    "Front Min Time [s]": "{:.3f}",
+    "Front Min Temp [K]": "{:.3f}",
+    "Front Max Time [s]": "{:.3f}",
+    "Front Max Temp [K]": "{:.3f}",
+    "Rear Min Time [s]": "{:.3f}",
+    "Rear Min Temp [K]": "{:.3f}",
+    "Rear Max Time [s]": "{:.3f}",
+    "Rear Max Temp [K]": "{:.3f}"
+}
 
 
 def run_configuration(
@@ -96,6 +119,42 @@ def run_batch(htcs: tuple[float, ...], diff_cond_pairs: tuple[tuple[float, float
     print(f"{len(failures)} trials failed.\n{failures}")
 
 
+def extract_data_from_batch(subdirectory: str, files_basename: str, data_filename: str):
+
+    if bool(Path(files_basename).suffix):
+        raise ValueError("Enter a file basename without an extension.")
+    if Path(data_filename).suffix not in [".csv", ""]:
+        raise ValueError(f"Data filename provided {data_filename} has an invalid extension. Provide with no extension or '.csv'.")
+    if Path(data_filename).suffix == "":
+        data_filename += ".csv"
+
+    l = len(files_basename)
+    files = sorted(
+        Path(f"data/{subdirectory}").glob(f"{files_basename}*.hdf5"),
+        key=lambda p: int(p.stem[l:]) # Sorts by file number
+    )
+
+    if not files:
+        raise FileNotFoundError(f"No data/{subdirectory}/{files_basename}*.hdf5 files found.")
+    
+    data_list: list[NDArray[np.float64]] = []
+    for path in files:
+        entry = np.empty(len(BATCH_FMTS), dtype=np.float64)
+        entry[0] = int(path.stem[l:])
+        rel_path = path.relative_to("data")
+        data = DataHandler(str(rel_path))
+        data.load_data()
+        data.extract_data(entry)
+        data.close()
+        data_list.append(entry)
+    data_array = np.asarray(data_list)
+    df = pd.DataFrame(data_array, columns=list(BATCH_FMTS))
+    df_formatted = df.copy()
+    for col, fmt in BATCH_FMTS.items():
+        df_formatted[col] = df[col].map(fmt.format)
+    df_formatted.to_csv(f"data/{subdirectory}/{data_filename}", index=False)
+
+
 # filename = "test.hdf5"
 # htcs_array = np.array([
 #     [0., 10., 10.],
@@ -106,17 +165,19 @@ def run_batch(htcs: tuple[float, ...], diff_cond_pairs: tuple[tuple[float, float
 # material = (4.91e-5, 57.5, np.array([[0.1, 0.5]], dtype=np.float64))
 # run_configuration(filename, material, 0.003, GAS_2200_CONSTANT_ARRAY, htcs_array, period=3.0, diff_num=0.1, max_t_step=1e-4, force_overwrite=False)
 
-htcs = (100., 300., 600.)
-diff_cond_pairs = (
-    (1e-6, 2.),
-    (1.5e-6, 7.),
-    (3e-6, 6.),
-    (3e-6, 20.),
-    (6e-6, 15.),
-    (8e-6, 50.),
-    (2e-5, 40.),
-    (3e-5, 130.),
-    (8e-5, 200.)
-)
-lengths = (0.003, 0.006, 0.012)
-run_batch(htcs, diff_cond_pairs, lengths)
+# htcs = (100., 300., 600.)
+# diff_cond_pairs = (
+#     (1e-6, 2.),
+#     (1.5e-6, 7.),
+#     (3e-6, 6.),
+#     (3e-6, 20.),
+#     (6e-6, 15.),
+#     (8e-6, 50.),
+#     (2e-5, 40.),
+#     (3e-5, 130.),
+#     (8e-5, 200.)
+# )
+# lengths = (0.003, 0.006, 0.012)
+# run_batch(htcs, diff_cond_pairs, lengths)
+
+extract_data_from_batch("batch", "trial", "batch_data.csv")
