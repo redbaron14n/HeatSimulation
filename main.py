@@ -55,7 +55,7 @@ def run_configuration(
         init_temps = np.full(x_res, ambient_temp, dtype=np.float64)
     if max_sim_time is None:
         htc = np.max(htcs_kernel[:, 1])
-        max_sim_time = 6 * cond * length / (diff * htc) + 200. # Based on fitting simulated data + tolerance
+        max_sim_time = 3 * cond * length / (diff * htc) + 400. # Based on fitting simulated data + tolerance
     solver = FiniteDiffSolver1D(system, init_temps, gas_temp_kernel, htcs_kernel, period, ambient_temp, x_res, min_sim_time, max_sim_time, diff_num, max_t_step_size=max_t_step)
     solver.run_simulation(filename, print_every=print_every, force_overwrite=force_overwrite)
 
@@ -85,36 +85,45 @@ def analyze_data(filename: str):
     data.close()
 
 
-def run_mini(filename: str, htc: float, diff: float, cond: float, length: float, print_every: int=int(1e6)):
+def run_mini(filename: str, chop_dur: float, chop_period: float, htc: float, diff: float, cond: float, length: float, print_every: int=int(1e6)):
 
     htcs_array = np.array([
         [0., 10., 10.],
-        [0.499999, 10., 10.],
-        [0.5, htc, 10.],
-        [2.999999, htc, 10.]
+        [chop_dur-1e-6, 10., 10.],
+        [chop_dur, htc, 10.],
+        [chop_period-1e-6, htc, 10.]
     ], dtype=np.float64)
     material = (diff, cond, np.array([[0.1, 0.5]], dtype=np.float64))
-    run_configuration(filename, material, length, GAS_2200_CONSTANT_ARRAY, htcs_array, period=3., diff_num=0.1, max_t_step=1e-4, force_overwrite=True, print_every=print_every)
+    run_configuration(filename, material, length, GAS_2200_CONSTANT_ARRAY, htcs_array, period=chop_period, diff_num=0.1, max_t_step=1e-4, force_overwrite=True, print_every=print_every)
 
 
-def run_batch(htcs: tuple[float, ...], diff_cond_pairs: tuple[tuple[float, float], ...], lengths: tuple[float, ...]):
-
-    failures: list[tuple[int, float, float, float, float]] = []
-    for trial, (htc, diff_cond_pair, length) in enumerate(
-        product(htcs, diff_cond_pairs, lengths)
+def run_batch(
+        chop_durations: tuple[float, ...],
+        chop_periods: tuple[float, ...],
+        htcs: tuple[float, ...],
+        diff_cond_pairs: tuple[tuple[float, float], ...],
+        lengths: tuple[float, ...],
+        start_indx: int=0,
+        rerun: list[int] | None = None
     ):
-        # if trial not in [56]:
-        #     continue
+
+    failures: list[tuple[int, float, float, float, float, float, float]] = []
+    for trial, (dur, period, htc, diff_cond_pair, length) in enumerate(
+        product(chop_durations, chop_periods, htcs, diff_cond_pairs, lengths)
+    ):
+        trial += start_indx
+        if (rerun is not None) and (trial not in rerun):
+            continue
         filename = f"batch/trial{trial}.hdf5"
         diff, cond = diff_cond_pair
         try:
-            run_mini(filename, htc, diff, cond, length)
+            run_mini(filename, dur, period, htc, diff, cond, length)
             data = DataHandler(filename)
             data.load_data()
             print_reports(data)
             data.close()
         except (ValueError, RuntimeError):
-            failures.append((trial, htc, diff, cond, length))
+            failures.append((trial, dur, period, htc, diff, cond, length))
             print_exc()
     print(f"{len(failures)} trials failed.\n{failures}")
 
@@ -154,30 +163,5 @@ def extract_data_from_batch(subdirectory: str, files_basename: str, data_filenam
         df_formatted[col] = df[col].map(fmt.format)
     df_formatted.to_csv(f"data/{subdirectory}/{data_filename}", index=False)
 
-
-# filename = "test.hdf5"
-# htcs_array = np.array([
-#     [0., 10., 10.],
-#     [0.499999, 10., 10.],
-#     [0.5, 100., 10.],
-#     [2.999999, 100., 10.]
-# ], dtype=np.float64)
-# material = (4.91e-5, 57.5, np.array([[0.1, 0.5]], dtype=np.float64))
-# run_configuration(filename, material, 0.003, GAS_2200_CONSTANT_ARRAY, htcs_array, period=3.0, diff_num=0.1, max_t_step=1e-4, force_overwrite=False)
-
-# htcs = (100., 300., 600.)
-# diff_cond_pairs = (
-#     (1e-6, 2.),
-#     (1.5e-6, 7.),
-#     (3e-6, 6.),
-#     (3e-6, 20.),
-#     (6e-6, 15.),
-#     (8e-6, 50.),
-#     (2e-5, 40.),
-#     (3e-5, 130.),
-#     (8e-5, 200.)
-# )
-# lengths = (0.003, 0.006, 0.012)
-# run_batch(htcs, diff_cond_pairs, lengths)
 
 extract_data_from_batch("batch", "trial", "batch_data.csv")
