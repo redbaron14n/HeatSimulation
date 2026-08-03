@@ -1,6 +1,7 @@
 from domain.conductive_system_1D import ConductiveSystem1D
 from domain.finite_diff_solver_1D import FiniteDiffSolver1D
 from domain.prefabs import *
+from domain.steadystate import find_steadystate
 from itertools import product
 from numpy.typing import NDArray
 from pathlib import Path
@@ -89,45 +90,82 @@ def analyze_data(filename: str):
     data.close()
 
 
-def run_mini(filename: str, chop_dur: float, chop_period: float, htc: float, diff: float, cond: float, length: float, print_every: int=int(1e6)):
+def run_mini(
+        filename: str,
+        cond: float,
+        diff: float,
+        emis: float,
+        h_heat: float,
+        h_nat: float,
+        length: float,
+        gas: float,
+        ambi: float,
+        dur: float,
+        per: float,
+        print_every: int=int(1e6),
+        max_t_step: float=1e-4,
+        max_sim_time: float | None = None,
+        x_res: int=25
+):
 
     htcs_array = np.array([
-        [0., 10., 10.],
-        [chop_dur-1e-6, 10., 10.],
-        [chop_dur, htc, 10.],
-        [chop_period-1e-6, htc, 10.]
+        [0., h_nat, h_nat],
+        [dur-1e-6, h_nat, h_nat],
+        [dur, h_heat, h_nat],
+        [per-1e-6, h_heat, h_nat]
     ], dtype=np.float64)
-    material = (diff, cond, np.array([[0.1, 0.5]], dtype=np.float64))
-    run_configuration(filename, material, length, GAS_2200_CONSTANT_ARRAY, htcs_array, period=chop_period, diff_num=0.1, max_t_step=1e-4, force_overwrite=True, print_every=print_every)
+    material = (diff, cond, np.array([[0.1, emis]], dtype=np.float64))
+    gas_temps = np.array([[0., gas, ambi]], dtype=np.float64)
+    init_temps = find_steadystate(cond, emis, h_heat, h_nat, length, gas, ambi, dur, per, x_res)
+    run_configuration(
+        filename=filename,
+        material=material,
+        length=length,
+        gas_temp_kernel=gas_temps,
+        htcs_kernel=htcs_array,
+        period=per,
+        x_res=x_res,
+        ambient_temp=ambi,
+        init_temps=init_temps,
+        max_sim_time=max_sim_time,
+        max_t_step=max_t_step,
+        print_every=print_every,
+        force_overwrite=True
+    )
 
 
 def run_batch(
-        chop_durations: tuple[float, ...],
-        chop_periods: tuple[float, ...],
-        htcs: tuple[float, ...],
-        diff_cond_pairs: tuple[tuple[float, float], ...],
+        subdir: str,
+        conds: tuple[float, ...],
+        diffs: tuple[float, ...],
+        emiss: tuple[float, ...],
+        h_heats: tuple[float, ...],
+        h_nats: tuple[float, ...],
         lengths: tuple[float, ...],
+        gas_temps: tuple[float, ...],
+        ambi_temps: tuple[float, ...],
+        chop_durs: tuple[float, ...],
+        chop_pers: tuple[float, ...],
         start_indx: int=0,
         rerun: list[int] | None = None
-    ):
+):
 
-    failures: list[tuple[int, float, float, float, float, float, float]] = []
-    for trial, (dur, period, htc, diff_cond_pair, length) in enumerate(
-        product(chop_durations, chop_periods, htcs, diff_cond_pairs, lengths)
+    failures: list[tuple[int, float, float, float, float, float, float, float, float, float, float]] = []
+    for trial, (cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per) in enumerate(
+        product(conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)
     ):
         trial += start_indx
         if (rerun is not None) and (trial not in rerun):
             continue
-        filename = f"batch/trial{trial}.hdf5"
-        diff, cond = diff_cond_pair
+        filename = f"{subdir}/trial{trial}.hdf5"
         try:
-            run_mini(filename, dur, period, htc, diff, cond, length)
+            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=100.)
             data = DataHandler(filename)
             data.load_data()
             print_reports(data)
             data.close()
         except (ValueError, RuntimeError):
-            failures.append((trial, dur, period, htc, diff, cond, length))
+            failures.append((trial, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per))
             print_exc()
     print(f"{len(failures)} trials failed.\n{failures}")
 
@@ -168,4 +206,15 @@ def extract_data_from_batch(subdirectory: str, files_basename: str, data_filenam
     df_formatted.to_csv(f"data/{subdirectory}/{data_filename}", index=False)
 
 
-extract_data_from_batch("batch", "trial", "batch_data.csv")
+conds = 20.,
+diffs = 3e-5,
+emiss = 0.4, 0.8
+h_heats = 200.,
+h_nats = 5., 15.,
+lengths = 0.005,
+gas_temps = 2000., 3000.
+ambi_temps = 273.15, 373.15
+chop_durs = 0.75,
+chop_pers = 3.2,
+
+run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)

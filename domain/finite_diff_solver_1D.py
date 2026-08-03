@@ -6,6 +6,7 @@
 
 import numpy as np
 from domain.conductive_system_1D import ConductiveSystem1D
+from domain.domain_constants import *
 from domain.lookup_tables import LookupTables
 from numpy.typing import NDArray
 from services.data_handling import DataHandler
@@ -13,9 +14,6 @@ from services.snapshot_buffer_dataclass import SnapshotBuffer
 from time import perf_counter
 
 np.set_printoptions(linewidth=200, threshold=10)
-
-BOLTZ = 5.670374419e-8 # Stefan-Boltzmann constant [W/m^2/K^4]
-MAX_TEMP = 6000 # Maximum temperature in the simulation [K]
 
 
 class FiniteDiffSolver1D:
