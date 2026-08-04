@@ -584,12 +584,11 @@ class FiniteDiffSolver1D:
             buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
             saved = 1
         converged = False
-        post_cycles_rem = 0
         tick = 0
         start_time = perf_counter()
         rms = -1.
 
-        while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count):
+        while (not converged) and (tick < self._tick_count):
 
             tick += 1
             sim_time: float = times[tick]
@@ -612,11 +611,7 @@ class FiniteDiffSolver1D:
                 cycles_completed += 1
                 if cycles_completed > 1:
                     rms = np.sqrt(np.mean((curr_cycle - prev_cycle)**2))
-                    if (not converged) and (rms < conv_tol):
-                        converged = True
-                        post_cycles_rem = 2
-                    elif converged:
-                        post_cycles_rem -= 1
+                    converged = (rms < conv_tol)
                 curr_cycle, prev_cycle = prev_cycle, curr_cycle
 
             self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)

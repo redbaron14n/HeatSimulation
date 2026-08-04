@@ -5,6 +5,7 @@ from domain.steadystate import find_steadystate
 from itertools import product
 from numpy.typing import NDArray
 from pathlib import Path
+from time import perf_counter
 from traceback import print_exc
 from visualizer import *
 import numpy as np
@@ -104,15 +105,14 @@ def run_mini(
         per: float,
         print_every: int=int(1e6),
         max_t_step: float=1e-4,
+        diff_num: float=0.1,
         max_sim_time: float | None = None,
         x_res: int=25
 ):
 
     htcs_array = np.array([
         [0., h_nat, h_nat],
-        [dur-1e-6, h_nat, h_nat],
-        [dur, h_heat, h_nat],
-        [per-1e-6, h_heat, h_nat]
+        [dur, h_heat, h_nat]
     ], dtype=np.float64)
     material = (diff, cond, np.array([[0.1, emis]], dtype=np.float64))
     gas_temps = np.array([[0., gas, ambi]], dtype=np.float64)
@@ -129,6 +129,7 @@ def run_mini(
         init_temps=init_temps,
         max_sim_time=max_sim_time,
         max_t_step=max_t_step,
+        diff_num=diff_num,
         print_every=print_every,
         force_overwrite=True
     )
@@ -150,16 +151,17 @@ def run_batch(
         rerun: list[int] | None = None
 ):
 
+    start_time = perf_counter()
     failures: list[tuple[int, float, float, float, float, float, float, float, float, float, float]] = []
-    for trial, (cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per) in enumerate(
-        product(conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)
+    for trial, (emis, h_heat, h_nat, length, gas, ambi, dur, per, cond, diff) in enumerate(
+        product(emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, conds, diffs)
     ):
         trial += start_indx
         if (rerun is not None) and (trial not in rerun):
             continue
         filename = f"{subdir}/trial{trial}.hdf5"
         try:
-            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=100.)
+            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=1000., print_every=int(1e6), diff_num=0.1, max_t_step=1e-4, x_res=25)
             data = DataHandler(filename)
             data.load_data()
             print_reports(data)
@@ -167,6 +169,9 @@ def run_batch(
         except (ValueError, RuntimeError):
             failures.append((trial, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per))
             print_exc()
+        runtime = perf_counter() - start_time
+        avg_runtime = runtime / (trial - start_indx + 1)
+        print(f"Trials Complete: {trial-start_indx+1}, Total Runtime: {runtime:.3f}s, Avg. {avg_runtime:.3f}s/trial")
     print(f"{len(failures)} trials failed.\n{failures}")
 
 
@@ -206,15 +211,28 @@ def extract_data_from_batch(subdirectory: str, files_basename: str, data_filenam
     df_formatted.to_csv(f"data/{subdirectory}/{data_filename}", index=False)
 
 
-conds = 20.,
-diffs = 3e-5,
-emiss = 0.4, 0.8
-h_heats = 200.,
-h_nats = 5., 15.,
-lengths = 0.005,
-gas_temps = 2000., 3000.
-ambi_temps = 273.15, 373.15
-chop_durs = 0.75,
-chop_pers = 3.2,
+conds = 1., 10., 100., 1000.
+diffs = 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3
+emiss = 0.3,
+h_heats = 10., 100., 1000.
+h_nats = 15.,
+lengths = 0.001, 0.01
+gas_temps = 3030.,
+ambi_temps = 273.15,
+chop_durs = 0.3, 1.
+chop_pers = 1.2, 1.5, 2.
+
+# conds = 20.,
+# diffs = 3e-5,
+# emiss = 0.3,
+# h_heats = 200.,
+# h_nats = 15.,
+# lengths = 0.005,
+# gas_temps = 3030.,
+# ambi_temps = 273.15,
+# chop_durs = 0.3, 1.
+# chop_pers = 1.2, 1.5, 2.
 
 run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)
+
+# analyze_data("batch2/trial5.hdf5")
