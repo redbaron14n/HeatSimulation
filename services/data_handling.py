@@ -188,26 +188,23 @@ class DataHandler():
         if n_cycles < 2:
             raise RuntimeError("At least two complete cycles are required to determine steadystate.")
 
-        phase_grid = np.linspace(0., self._period, 500)
-
         for cycle in range(1, n_cycles):
             t0_prev = (cycle - 1) * self._period
             t1_prev = cycle * self._period
-
-            i0_prev = np.searchsorted(self._times, t0_prev, side="left")
-            i1_prev = np.searchsorted(self._times, t1_prev, side="right")
-
-            prev_times = self._times[i0_prev:i1_prev] - t0_prev
-            prev_temps = self._temps[i0_prev:i1_prev]
-
             t0_curr = cycle * self._period
             t1_curr = (cycle + 1) * self._period
 
+            i0_prev = np.searchsorted(self._times, t0_prev, side="left")
+            i1_prev = np.searchsorted(self._times, t1_prev, side="left")
             i0_curr = np.searchsorted(self._times, t0_curr, side="left")
-            i1_curr = np.searchsorted(self._times, t1_curr, side="right")
+            i1_curr = np.searchsorted(self._times, t1_curr, side="left")
 
+            prev_times = self._times[i0_prev:i1_prev] - t0_prev
+            prev_temps = self._temps[i0_prev:i1_prev]
             curr_times = self._times[i0_curr:i1_curr] - t0_curr
             curr_temps = self._temps[i0_curr:i1_curr]
+
+            phase_grid = prev_times if len(prev_times) >= len(curr_times) else curr_times
 
             prev_interp = np.empty((len(phase_grid), self._temps.shape[1]))
             curr_interp = np.empty_like(prev_interp)
@@ -216,8 +213,8 @@ class DataHandler():
                 prev_interp[:, j] = np.interp(phase_grid, prev_times, prev_temps[:, j])
                 curr_interp[:, j] = np.interp(phase_grid, curr_times, curr_temps[:, j])
 
-            max_dev = np.amax(np.abs(curr_interp - prev_interp))
-            if max_dev < CHOP_CONV_TOL:
+            rms = np.sqrt(np.mean((curr_interp - prev_interp)**2))
+            if rms < CHOP_CONV_TOL:
                 true_index = int(i0_curr)
                 return cycle, true_index
 
