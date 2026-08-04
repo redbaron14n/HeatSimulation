@@ -529,10 +529,10 @@ class FiniteDiffSolver1D:
             save_evo: bool = True,
             save_final: bool = False,
             load_prev: bool = False,
-            conv_tol: float = 1e-6,
+            conv_tol: float = 1e-3,
             print_every: int = 100000,
             save_tol: float = 0.01,
-            time_tol: float = 1e-3,
+            time_tol: float = 1e-6,
             chunk_size: int = 1000,
             force_overwrite: bool = False
     ):
@@ -555,11 +555,18 @@ class FiniteDiffSolver1D:
         if load_prev:
             file.load_data()
             self._init_temps = file.init_temps
+
         temps = self._init_temps
         self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
         file.initialize_storage((self._x_res,), self._construct_metadata(), force_overwrite)
         times = np.arange(self._tick_count+1, dtype=np.float64) * self._t_step
         gasses, htcs, emis_lookup = self._build_lookup_tables(times)
+        cycle_ticks = int(round(self._period / self._t_step))
+
+        prev_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
+        curr_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
+        cycle_indx = 0
+        cycles_completed = 0
         saved = 0
         if save_evo:
             buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
@@ -567,20 +574,34 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         start_time = perf_counter()
+        rms = -1.
+
         while (not converged) and (tick < self._tick_count):
+
             tick += 1
+            sim_time: float = times[tick]
             T_new = temps.copy()
             T_inside0, T_inside1 = temps[1], temps[-2] # Finds the previous temperatures just inside the boundaries
-            sim_time: float = times[tick]
             gas_temp0, gas_temp1 = gasses[0][tick], gasses[1][tick]
             htc0, htc1 = htcs[0][tick], htcs[1][tick]
             emis = emis_lookup[temps.astype(int)]
             emis0, emis1 = emis[0], emis[-1]
+
             T_new[0] = self._solve_boundary_temp(emis0, htc0, T_inside0, gas_temp0)
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
-            converged, rms = self._check_convergence(T_new, temps, conv_tol, sim_time)
             temps = T_new
+
+            curr_cycle[cycle_indx] = T_new
+            cycle_indx += 1
+            if cycle_indx == cycle_ticks:
+                cycle_indx = 0
+                cycles_completed += 1
+                if cycles_completed > 1:
+                    rms = np.amax(np.abs(curr_cycle - prev_cycle))
+                    converged = rms < conv_tol
+                curr_cycle, prev_cycle = prev_cycle, curr_cycle
+
             self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)
             if save_evo:
                 saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, converged, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
