@@ -13,7 +13,7 @@ from services.data_handling import DataHandler
 from services.snapshot_buffer_dataclass import SnapshotBuffer
 from time import perf_counter
 
-np.set_printoptions(linewidth=200, threshold=10)
+np.set_printoptions(linewidth=200, threshold=20000)
 
 
 class FiniteDiffSolver1D:
@@ -407,6 +407,18 @@ class FiniteDiffSolver1D:
             print(f"Simulation reached maximum time without convergence with {saved} saved data points.\nSimulation took {runtime:.3f}s to run and averaged {tick/runtime:.3f} ticks/s.")
 
 
+    def _floor_interp(self, x_new: NDArray[np.float64], x: NDArray[np.float64], y: NDArray[np.float64], left: float | None = None) -> NDArray[np.float64]:
+
+        idx = np.searchsorted(x, x_new, side="right") - 1
+        if left is None:
+            idx = np.clip(idx, 0, len(y)-1)
+            return y[idx]
+        out = np.full(np.shape(x_new), left, dtype=np.float64)
+        mask = (idx >= 0.)
+        out[mask] = y[np.clip(idx[mask], 0, len(y)-1)]
+        return out
+
+
     def _build_lookup_tables(self, times: NDArray[np.float64]) -> LookupTables:
 
         """
@@ -423,15 +435,15 @@ class FiniteDiffSolver1D:
             htcs_data = self.create_chop_schedule(self._htcs)
         emis_data = self._system.emissivities
 
-        gas_temp0_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 1], left=self._ambient_temp)
-        gas_temp1_lookup = np.interp(times, gas_data[:, 0], gas_data[:, 2], left=self._ambient_temp)
+        gas_temp0_lookup = self._floor_interp(times, gas_data[:, 0], gas_data[:, 1], left=self._ambient_temp)
+        gas_temp1_lookup = self._floor_interp(times, gas_data[:, 0], gas_data[:, 2], left=self._ambient_temp)
         gasses_lookup = (gas_temp0_lookup, gas_temp1_lookup)
 
-        htcs0_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 1])
-        htcs1_lookup = np.interp(times, htcs_data[:, 0], htcs_data[:, 2])
+        htcs0_lookup = self._floor_interp(times, htcs_data[:, 0], htcs_data[:, 1])
+        htcs1_lookup = self._floor_interp(times, htcs_data[:, 0], htcs_data[:, 2])
         htcs_lookup = (htcs0_lookup, htcs1_lookup)
 
-        emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1), emis_data[:, 0], emis_data[:, 1])
+        emis_lookup = self._floor_interp(np.arange(0, MAX_TEMP + 1, dtype=np.float64), emis_data[:, 0], emis_data[:, 1])
 
         return LookupTables(gasses_lookup, htcs_lookup, emis_lookup)
     
@@ -511,9 +523,9 @@ class FiniteDiffSolver1D:
         if self._max_time <= self._period:
             raise ValueError(f"The max time must be greater than the given period, but {self._max_time} <= {self._period}.")
         
-        n_repeats = float(np.floor(self._max_time / self._period))
+        n_repeats = int(np.floor(self._max_time / self._period))
         blocks: list[NDArray[np.float64]] = []
-        i = 0.
+        i = 0
         while i <= n_repeats:
             block = array_map.copy()
             block[:, 0] += i * self._period
