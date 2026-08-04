@@ -13,7 +13,7 @@ from services.data_handling import DataHandler
 from services.snapshot_buffer_dataclass import SnapshotBuffer
 from time import perf_counter
 
-np.set_printoptions(linewidth=200, threshold=20000)
+np.set_printoptions(linewidth=200, threshold=10)
 
 
 class FiniteDiffSolver1D:
@@ -480,7 +480,7 @@ class FiniteDiffSolver1D:
             chunk_size: int
     ) -> int:
         
-        rms_last = np.sqrt(((new_temps - buffer.last_saved)**2).mean())
+        rms_last = np.sum(np.abs(new_temps - buffer.last_saved))
         if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or converged or (time >= self._max_time):
             buffer.times.append(time)
             buffer.temps.append(new_temps)
@@ -543,7 +543,7 @@ class FiniteDiffSolver1D:
             load_prev: bool = False,
             conv_tol: float = 1e-3,
             print_every: int = 100000,
-            save_tol: float = 0.01,
+            save_tol: float = 1e-2,
             time_tol: float = 1e-6,
             chunk_size: int = 1000,
             force_overwrite: bool = False

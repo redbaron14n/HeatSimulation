@@ -12,8 +12,7 @@ import numpy as np
 
 DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
-CHOP_CONV_WINDOW = 5
-CHOP_CONV_TOL = 1e-2
+CHOP_CONV_TOL = 1e-3
 CYCLE_WINDOW = (-0.1, 0.9)
 
 
@@ -156,7 +155,7 @@ class DataHandler():
                 min_mask = ((col[1:-1] < col[:-2]) & (col[1:-1] < col[2:]))
                 local = np.where(min_mask)[0] + 1
                 if len(local):
-                    min_indx = local[0]
+                    min_indx = local[col[local].argmin()]
                 else:
                     min_indx = np.argmin(col)
                 
@@ -164,7 +163,7 @@ class DataHandler():
                 max_mask = ((col[1:-1] > col[:-2]) & (col[1:-1] > col[2:]))
                 local = np.where(max_mask)[0] + 1
                 if len(local):
-                    max_indx = local[0]
+                    max_indx = local[col[local].argmax()]
                 else:
                     max_indx = np.argmax(col)
                 
@@ -180,18 +179,49 @@ class DataHandler():
 
     def _find_chop_steady_index(self) -> Tuple[int, int]:
 
-        if (self._extrema is None) or (self._times is None):
+        if (self._times is None) or (self._temps is None):
             raise RuntimeError("No data has been loaded.")
-        n: int = self._extrema.shape[0]
-        if n < CHOP_CONV_WINDOW + 1:
-            raise ValueError(f"At least {CHOP_CONV_WINDOW+1} cycles are needed for convergence testing. Current data contains only {n}.")
-        for i in range(CHOP_CONV_WINDOW, n):
-            prev = self._extrema[i-CHOP_CONV_WINDOW:i, :, [1, 3]].mean(axis=1)
-            curr = self._extrema[i-CHOP_CONV_WINDOW+1:i+1, :, [1, 3]].mean(axis=1)
-            if np.all(np.abs(curr - prev) <= CHOP_CONV_TOL):
-                true_i = cast(int, np.searchsorted(self._times, self._extrema[i, 0, 0], side="right"))
-                return i, true_i
-        raise RuntimeError("Chop simulation did not reach steady-state. Either run simulation longer or lower chop convergence tolerance constant.")
+
+        max_time = self._times[-1]
+        n_cycles = int(max_time // self._period)
+
+        if n_cycles < 2:
+            raise RuntimeError("At least two complete cycles are required to determine steadystate.")
+
+        phase_grid = np.linspace(0., self._period, 500)
+
+        for cycle in range(1, n_cycles):
+            t0_prev = (cycle - 1) * self._period
+            t1_prev = cycle * self._period
+
+            i0_prev = np.searchsorted(self._times, t0_prev, side="left")
+            i1_prev = np.searchsorted(self._times, t1_prev, side="right")
+
+            prev_times = self._times[i0_prev:i1_prev] - t0_prev
+            prev_temps = self._temps[i0_prev:i1_prev]
+
+            t0_curr = cycle * self._period
+            t1_curr = (cycle + 1) * self._period
+
+            i0_curr = np.searchsorted(self._times, t0_curr, side="left")
+            i1_curr = np.searchsorted(self._times, t1_curr, side="right")
+
+            curr_times = self._times[i0_curr:i1_curr] - t0_curr
+            curr_temps = self._temps[i0_curr:i1_curr]
+
+            prev_interp = np.empty((len(phase_grid), self._temps.shape[1]))
+            curr_interp = np.empty_like(prev_interp)
+
+            for j in range(self._temps.shape[1]):
+                prev_interp[:, j] = np.interp(phase_grid, prev_times, prev_temps[:, j])
+                curr_interp[:, j] = np.interp(phase_grid, curr_times, curr_temps[:, j])
+
+            max_dev = np.amax(np.abs(curr_interp - prev_interp))
+            if max_dev < CHOP_CONV_TOL:
+                true_index = int(i0_curr)
+                return cycle, true_index
+
+        raise RuntimeError("Chop simulation did not reach steady-state.")
 
 
     ########################################
