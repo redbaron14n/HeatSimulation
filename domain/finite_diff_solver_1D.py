@@ -7,7 +7,6 @@
 import numpy as np
 from domain.conductive_system_1D import ConductiveSystem1D
 from domain.domain_constants import *
-from domain.lookup_tables import LookupTables
 from numpy.typing import NDArray
 from services.data_handling import DataHandler
 from services.snapshot_buffer_dataclass import SnapshotBuffer
@@ -419,33 +418,11 @@ class FiniteDiffSolver1D:
         return out
 
 
-    def _build_lookup_tables(self, times: NDArray[np.float64]) -> LookupTables:
+    def _build_emis_lookup(self) -> NDArray[np.float64]:
 
-        """
-        Build lookup tables for the simulation data. Drastically reduces the computational cost of interpolation during the simulation.
-
-        :param times: The time points for which to build the lookup tables.
-        :return: A tuple of the lookup tables for gas temperature, heat transfer coefs, and emissivity.
-        """
-
-        gas_data = self._gas_temps
-        htcs_data = self._htcs
-        if self._period > 0:
-            gas_data = self.create_chop_schedule(self._gas_temps)
-            htcs_data = self.create_chop_schedule(self._htcs)
         emis_data = self._system.emissivities
-
-        gas_temp0_lookup = self._floor_interp(times, gas_data[:, 0], gas_data[:, 1], left=self._ambient_temp)
-        gas_temp1_lookup = self._floor_interp(times, gas_data[:, 0], gas_data[:, 2], left=self._ambient_temp)
-        gasses_lookup = (gas_temp0_lookup, gas_temp1_lookup)
-
-        htcs0_lookup = self._floor_interp(times, htcs_data[:, 0], htcs_data[:, 1])
-        htcs1_lookup = self._floor_interp(times, htcs_data[:, 0], htcs_data[:, 2])
-        htcs_lookup = (htcs0_lookup, htcs1_lookup)
-
-        emis_lookup = self._floor_interp(np.arange(0, MAX_TEMP + 1, dtype=np.float64), emis_data[:, 0], emis_data[:, 1])
-
-        return LookupTables(gasses_lookup, htcs_lookup, emis_lookup)
+        emis_lookup = np.interp(np.arange(0, MAX_TEMP + 1, dtype=np.float64), emis_data[:, 0], emis_data[:, 1])
+        return emis_lookup
     
 
     def _construct_metadata(self) -> dict[str, int | float | NDArray[np.float64]]:
@@ -495,20 +472,6 @@ class FiniteDiffSolver1D:
         return saved
 
 
-    # def _lookup_value(self, x: float, data: NDArray[np.float64], col: int, default: float | None = None, interp: bool = False, periodic: bool = False) -> float:
-
-    #     if (default is not None) and (x < data[0, 0]):
-    #         return default
-    #     if interp:
-    #         return np.interp(x, data[:, 0], data[:, col])
-    #     lookup_x = x
-    #     if periodic and (self._period > 0):
-    #         lookup_x = x % self._period
-    #     indx = np.searchsorted(data[:, 0], lookup_x, side="right") - 1
-    #     indx = max(0, min(indx, len(data) - 1))
-    #     return float(data[indx, col])
-
-
     ########################################
     # Public Methods
     ########################################
@@ -556,7 +519,7 @@ class FiniteDiffSolver1D:
             load_prev: bool = False,
             conv_tol: float = 1e-3,
             print_every: int = 100000,
-            save_tol: float = 1e-2,
+            save_tol: float = 5e-3,
             time_tol: float = 1e-6,
             chunk_size: int = 1000,
             force_overwrite: bool = False
@@ -569,9 +532,10 @@ class FiniteDiffSolver1D:
         :param save_evo: Whether to save periodic snapshots of the temperature evolution over time to the file. Default is True.
         :param save_final: Whether to save the final temperature distribution to the file. Default is False.
         :param load_prev_final: Whether to load the previously saved final temperature distribution to use as this run's initial temperature distribution. Default is False.
-        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the sum of the squares of the differences between iterations falls to or below this tolerance. Default is 1e-6.
-        :param print_every: The interval at which to print the simulation progress. Default is 1000. 0 means no printing.
-        :param save_tol: How large the sum square of differences between latest and last saved temperature distributions must be before it is saved. Default is 1e-3.
+        :param conv_tol: The convergence tolerance of the simulation. The simulation will declare steady-state if the root mean square of the differences between iterations falls to or below this tolerance. Default is 1e-3.
+        :param print_every: The interval at which to print the simulation progress. Default is 100000. 0 means no printing.
+        :param save_tol: How large the RMS of differences between latest and last saved temperature distributions must be before it is saved. Default is 5e-3.
+        :param time_tol: How much time must pass between two distributions before another snapshot may be saved. Default is 1e-6s.
         :param chunk_size: How many distributions to calculate before saving.
         :param force_overwrite: Whether or not to force overwriting files for batch solving. Default is False.
         """
@@ -580,42 +544,81 @@ class FiniteDiffSolver1D:
         if load_prev:
             file.load_data()
             self._init_temps = file.init_temps
-
         temps = self._init_temps
-        self._validate_init_temps(temps) # Ensure initial temperatures are valid before starting simulation
-        file.initialize_storage((self._x_res,), self._construct_metadata(), force_overwrite)
-        times = np.arange(self._tick_count+1, dtype=np.float64) * self._t_step
-        gasses, htcs, emis_lookup = self._build_lookup_tables(times)
-        cycle_ticks = int(round(self._period / self._t_step))
+        self._validate_init_temps(temps)
 
+        T_new = np.empty_like(temps)
+
+        file.initialize_storage((self._x_res,), self._construct_metadata(), force_overwrite)
+
+        cycle_ticks = int(round(self._period / self._t_step))
         prev_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
         curr_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
-        cycle_indx = 0
-        cycles_completed = 0
-        saved = 0
-        if save_evo:
-            buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
-            saved = 1
+        cycle_indx = cycles_completed = post_cycles_rem = 0
+        buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
+        saved = 1
+        rms = -1.
+        sim_time = rel_time = 0.
+
+        gas_temp0 = self._ambient_temp
+        gas_temp1 = self._ambient_temp
+        curr_gas_idx = -1
+        next_gas_idx = 0
+        gas_entries = self._gas_temps.shape[0]
+        next_gas_time = self._gas_temps[0, 0]
+
+        htc0 = self._htcs[0, 2]
+        htc1 = self._htcs[0, 2]
+        curr_htc_idx = -1
+        next_htc_idx = 0
+        htc_entries = self._htcs.shape[0]
+        next_htc_time = self._htcs[0, 0]
+
+        emis_lookup = self._build_emis_lookup()
+
         converged = False
-        post_cycles_rem = 0
         tick = 0
         start_time = perf_counter()
-        rms = -1.
-        sim_time = 0.
-
         while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count):
-        # while (not converged) and (tick < self._tick_count):
 
             tick += 1
-            # sim_time = tick * self._t_step
-            sim_time = times[tick]
-            T_new = temps.copy()
-            T_inside0, T_inside1 = temps[1], temps[-2] # Finds the previous temperatures just inside the boundaries
-            gas_temp0, gas_temp1 = gasses[0][tick], gasses[1][tick]
-            htc0, htc1 = htcs[0][tick], htcs[1][tick]
-            emis = emis_lookup[temps.astype(int)]
-            emis0, emis1 = emis[0], emis[-1]
+            sim_time = tick * self._t_step
+            rel_time += self._t_step
+            if rel_time >= self._period:
+                rel_time -= self._period
 
+                curr_gas_idx = curr_htc_idx = -1
+                next_gas_idx = next_htc_idx = 0
+                next_gas_time = self._gas_temps[0, 0]
+                next_htc_time = self._htcs[0, 0]
+
+            if (next_gas_idx != -1) and (rel_time >= next_gas_time):
+                curr_gas_idx = next_gas_idx
+                if next_gas_idx + 1 == gas_entries:
+                    next_gas_idx = -1
+                else:
+                    next_gas_idx += 1
+                gas_temp0 = self._gas_temps[curr_gas_idx, 1]
+                gas_temp1 = self._gas_temps[curr_gas_idx, 2]
+                next_gas_time = self._gas_temps[next_gas_idx, 0]
+
+            if (next_htc_idx != -1) and (rel_time >= next_htc_time):
+                curr_htc_idx = next_htc_idx
+                if next_htc_idx + 1 == htc_entries:
+                    next_htc_idx = -1
+                else:
+                    next_htc_idx += 1
+                htc0 = self._htcs[curr_htc_idx, 1]
+                htc1 = self._htcs[curr_htc_idx, 2]
+                next_htc_time = self._htcs[next_htc_idx, 0]
+
+            emis = emis_lookup[temps.astype(int)]
+            emis0 = emis[0]
+            emis1 = emis[-1]
+
+            T_new = temps.copy()
+            T_inside0 = temps[1]
+            T_inside1 = temps[-2]
             T_new[0] = self._solve_boundary_temp(emis0, htc0, T_inside0, gas_temp0)
             T_new[-1] = self._solve_boundary_temp(emis1, htc1, T_inside1, gas_temp1)
             T_new = self._iterate_internal_temps(T_new, temps)
@@ -629,22 +632,19 @@ class FiniteDiffSolver1D:
                 if cycles_completed > 1:
                     rms = np.sqrt(np.mean((curr_cycle - prev_cycle)**2))
                     if (not converged) and (rms < conv_tol):
-                        print(cycles_completed)
-                        print(perf_counter() - start_time)
                         converged = True
                         post_cycles_rem = 2
                     elif converged:
                         post_cycles_rem -= 1
-                    # converged = (rms < conv_tol)
                 curr_cycle, prev_cycle = prev_cycle, curr_cycle
 
             self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)
             if save_evo:
-                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size)
+
         if save_evo: # One last time after being done
-            saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+            saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size)
         self._final_temps = temps
-        print(cycles_completed)
         if save_final:
             file.init_temps = temps
         file.close()

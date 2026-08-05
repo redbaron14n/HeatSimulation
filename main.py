@@ -85,7 +85,7 @@ def analyze_data(filename: str):
 
     data = DataHandler(filename)
     data.load_data()
-    # print_reports(data)
+    print_reports(data)
     time_evolution_plot(data)
     front_and_back_temp_plot(data)
     data.close()
@@ -214,28 +214,28 @@ def extract_data_from_batch(subdirectory: str, files_basename: str, data_filenam
     df_formatted.to_csv(f"data/{subdirectory}/{data_filename}", index=False)
 
 
-# conds = 1., 10., 100., 1000.
-# diffs = 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3
-# emiss = 0.3,
-# h_heats = 10., 100., 1000.
-# h_nats = 5.,
-# lengths = 0.001, 0.01
-# gas_temps = 3030.,
-# ambi_temps = 273.15,
-# chop_durs = 0.3, 1.
-# chop_pers = 1.2, 1.5, 2.
-
-conds = 20.,
-diffs = 3e-5,
+conds = 1., 10., 100., 1000.
+diffs = 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3
 emiss = 0.3,
-h_heats = 200.,
-h_nats = 15.,
-lengths = 0.005,
+h_heats = 10., 100., 1000.
+h_nats = 5.,
+lengths = 0.001, 0.01
 gas_temps = 3030.,
 ambi_temps = 273.15,
 chop_durs = 0.3, 1.
 chop_pers = 1.2, 1.5, 2.
 
+# conds = 20.,
+# diffs = 3e-5,
+# emiss = 0.3,
+# h_heats = 200.,
+# h_nats = 15.,
+# lengths = 0.005,
+# gas_temps = 3030.,
+# ambi_temps = 273.15,
+# chop_durs = 0.3, 1.
+# chop_pers = 1.2, 1.5, 2.
+
 run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)
 
-# analyze_data("batch2/trial0.hdf5")
+# analyze_data("batch2/trial4.hdf5")
