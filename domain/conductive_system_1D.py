@@ -94,7 +94,7 @@ class ConductiveSystem1D:
             raise ValueError("Each temperature must be positive.")
         if not (np.all(emis[:, 1] >= 0) and np.all(emis[:, 1] <= 1)):
             raise ValueError("Each emissivity must be between 0 and 1 inclusive.")
-        self._emis = emis
+        self._emis = emis[emis[:, 0].argsort()]
 
 
     @property

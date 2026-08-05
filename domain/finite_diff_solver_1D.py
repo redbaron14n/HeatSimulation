@@ -101,7 +101,7 @@ class FiniteDiffSolver1D:
             raise ValueError("Gas temperature times must be non-negative.")
         if not np.all(temps[:, 1:] > 0):
             raise ValueError("Gas temperatures must be positive.")
-        self._gas_temps = temps
+        self._gas_temps = temps[temps[:, 0].argsort()]
 
 
     @property
@@ -123,7 +123,7 @@ class FiniteDiffSolver1D:
             raise ValueError("All given times must be non-negative.")
         if not np.all(htcs[:, 1:] >= 0.):
             raise ValueError("All given heat transfer coefficients must be non-negative.")
-        self._htcs = htcs
+        self._htcs = htcs[htcs[:, 0].argsort()]
 
 
     @property
@@ -473,7 +473,6 @@ class FiniteDiffSolver1D:
             buffer: SnapshotBuffer,
             new_temps: NDArray[np.float64],
             time: float,
-            converged: bool,
             saved: int,
             save_tol: float,
             time_tol: float,
@@ -481,19 +480,33 @@ class FiniteDiffSolver1D:
     ) -> int:
         
         rms_last = np.sqrt(np.mean((new_temps - buffer.last_saved)**2))
-        if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or converged or (time >= self._max_time):
+        if ((rms_last >= save_tol) and (time - buffer.last_saved_time >= time_tol)) or (time >= self._max_time):
             buffer.times.append(time)
             buffer.temps.append(new_temps)
             buffer.last_saved = new_temps
             buffer.last_saved_time = time
             saved += 1
             buffer.size += 1
-        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or converged or (time >= self._max_time):
+        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or (time >= self._max_time):
             file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
             buffer.times.clear()
             buffer.temps.clear()
             buffer.size = 0
         return saved
+
+
+    # def _lookup_value(self, x: float, data: NDArray[np.float64], col: int, default: float | None = None, interp: bool = False, periodic: bool = False) -> float:
+
+    #     if (default is not None) and (x < data[0, 0]):
+    #         return default
+    #     if interp:
+    #         return np.interp(x, data[:, 0], data[:, col])
+    #     lookup_x = x
+    #     if periodic and (self._period > 0):
+    #         lookup_x = x % self._period
+    #     indx = np.searchsorted(data[:, 0], lookup_x, side="right") - 1
+    #     indx = max(0, min(indx, len(data) - 1))
+    #     return float(data[indx, col])
 
 
     ########################################
@@ -584,14 +597,18 @@ class FiniteDiffSolver1D:
             buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
             saved = 1
         converged = False
+        post_cycles_rem = 0
         tick = 0
         start_time = perf_counter()
         rms = -1.
+        sim_time = 0.
 
-        while (not converged) and (tick < self._tick_count):
+        while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count):
+        # while (not converged) and (tick < self._tick_count):
 
             tick += 1
-            sim_time: float = times[tick]
+            # sim_time = tick * self._t_step
+            sim_time = times[tick]
             T_new = temps.copy()
             T_inside0, T_inside1 = temps[1], temps[-2] # Finds the previous temperatures just inside the boundaries
             gas_temp0, gas_temp1 = gasses[0][tick], gasses[1][tick]
@@ -611,14 +628,23 @@ class FiniteDiffSolver1D:
                 cycles_completed += 1
                 if cycles_completed > 1:
                     rms = np.sqrt(np.mean((curr_cycle - prev_cycle)**2))
-                    converged = (rms < conv_tol)
+                    if (not converged) and (rms < conv_tol):
+                        print(cycles_completed)
+                        print(perf_counter() - start_time)
+                        converged = True
+                        post_cycles_rem = 2
+                    elif converged:
+                        post_cycles_rem -= 1
+                    # converged = (rms < conv_tol)
                 curr_cycle, prev_cycle = prev_cycle, curr_cycle
 
             self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)
             if save_evo:
-                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, converged, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
+        if save_evo: # One last time after being done
+            saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size) # pyright: ignore[reportPossiblyUnboundVariable]
         self._final_temps = temps
-        sim_time = times[tick]
+        print(cycles_completed)
         if save_final:
             file.init_temps = temps
         file.close()
