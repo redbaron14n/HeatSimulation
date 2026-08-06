@@ -14,8 +14,6 @@ from time import perf_counter
 
 np.set_printoptions(linewidth=200, threshold=10)
 
-ENERGY_TOL = 2.5e-4
-
 
 class FiniteDiffSolver1D:
 
@@ -525,7 +523,8 @@ class FiniteDiffSolver1D:
             save_tol: float = 1e-4,
             time_tol: float = 1e-4,
             chunk_size: int = 1000,
-            force_overwrite: bool = False
+            force_overwrite: bool = False,
+            max_runtime: float | None = None,
     ):
 
         """
@@ -541,6 +540,7 @@ class FiniteDiffSolver1D:
         :param time_tol: How much time must pass between two distributions before another snapshot may be saved. Default is 1e-6s.
         :param chunk_size: How many distributions to calculate before saving.
         :param force_overwrite: Whether or not to force overwriting files for batch solving. Default is False.
+        :param max_runtime: If set, determines the maximum runtime allowed for the simulation before quitting. Default is None.
         """
 
         file = DataHandler(filename)
@@ -582,7 +582,7 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         start_time = perf_counter()
-        while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count):
+        while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count) and (perf_counter() - start_time < max_runtime if max_runtime is not None else True):
 
             tick += 1
             sim_time = tick * self._t_step

@@ -52,7 +52,8 @@ def run_configuration(
         diff_num: float = 0.1,
         max_t_step: float = 1e-3,
         force_overwrite: bool = False,
-        print_every: int = int(1e5)
+        print_every: int = int(1e5),
+        max_runtime: float | None = None
 ):
     
     diff, cond, emis = material
@@ -63,7 +64,7 @@ def run_configuration(
         htc = np.max(htcs_kernel[:, 1])
         max_sim_time = 3 * cond * length / (diff * htc) + 400. # Based on fitting simulated data + tolerance
     solver = FiniteDiffSolver1D(system, init_temps, gas_temp_kernel, htcs_kernel, period, ambient_temp, x_res, min_sim_time, max_sim_time, diff_num, max_t_step_size=max_t_step)
-    solver.run_simulation(filename, print_every=print_every, force_overwrite=force_overwrite)
+    solver.run_simulation(filename, print_every=print_every, force_overwrite=force_overwrite, max_runtime=max_runtime)
 
 
 def get_final_temps(filename: str) -> NDArray[np.float64]:
@@ -107,6 +108,7 @@ def run_mini(
         max_t_step: float=1e-4,
         diff_num: float=0.1,
         max_sim_time: float | None = None,
+        max_runtime: float | None = None,
         x_res: int=25
 ):
 
@@ -131,7 +133,8 @@ def run_mini(
         max_t_step=max_t_step,
         diff_num=diff_num,
         print_every=print_every,
-        force_overwrite=True
+        force_overwrite=True,
+        max_runtime=max_runtime
     )
 
 
@@ -147,8 +150,11 @@ def run_batch(
         ambi_temps: tuple[float, ...],
         chop_durs: tuple[float, ...],
         chop_pers: tuple[float, ...],
-        start_indx: int=0,
-        rerun: list[int] | None = None
+        offset: int=0,
+        start_at: int=0,
+        rerun: list[int] | None = None,
+        max_sim_time: float | None = None,
+        max_runtime: float | None = None
 ):
 
     start_time = perf_counter()
@@ -157,13 +163,15 @@ def run_batch(
     for trial, (emis, h_heat, h_nat, length, gas, ambi, dur, per, cond, diff) in enumerate(
         product(emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, conds, diffs)
     ):
-        trial += start_indx
+        trial += offset
         if (rerun is not None) and (trial not in rerun):
+            continue
+        if trial < start_at:
             continue
         print(f"Trial {trial}, Cond: {cond}, Diff: {diff}, Emis: {emis}, h_heat: {h_heat}, h_nat: {h_nat}, length: {length}, gas: {gas}, ambi: {ambi}, dur: {dur}, per: {per}")
         filename = f"{subdir}/trial{trial}.hdf5"
         try:
-            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=1000., print_every=int(1e6), diff_num=0.1, max_t_step=1e-4, x_res=25)
+            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=max_sim_time, max_runtime=max_runtime)
             data = DataHandler(filename)
             data.load_data()
             print_reports(data)
@@ -236,6 +244,6 @@ chop_pers = 1.2, 1.5, 2.
 # chop_durs = 0.3, 1.
 # chop_pers = 1.2, 1.5, 2.
 
-run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers)
+run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=27, max_runtime=300.)
 
 # analyze_data("batch2/trial4.hdf5")
