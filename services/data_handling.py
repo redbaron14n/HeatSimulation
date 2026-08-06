@@ -147,7 +147,7 @@ class DataHandler():
             temps = self._temps[imin:imax]
 
             n_points = temps.shape[1]
-            cycle_extrema = np.empty((n_points, 4), dtype=np.float64)
+            cycle_extrema = np.empty((n_points, 6), dtype=np.float64)
             for j in range(n_points):
                 col = temps[:, j]
 
@@ -166,10 +166,21 @@ class DataHandler():
                     max_indx = local[col[local].argmax()]
                 else:
                     max_indx = np.argmax(col)
+
+                # Inflection
+                lo = min(min_indx, max_indx)
+                hi = max(min_indx, max_indx)
+                focus = col[lo:hi+1]
+                dt = np.diff(self._times[imin+lo:imin+hi+1])
+                dTdt = np.diff(focus) / dt
+                rel_indx = np.argmax(np.abs(dTdt))
+                inf_indx = lo + rel_indx + 1
                 
                 cycle_extrema[j] = (
                     self._times[imin + min_indx],
                     col[min_indx],
+                    self._times[imin + inf_indx],
+                    col[inf_indx],
                     self._times[imin + max_indx],
                     col[max_indx]
                 )
@@ -347,11 +358,12 @@ class DataHandler():
             raise ValueError("Data has not been loaded.")
         index, abs_index = self._find_chop_steady_index()
         self.report_final_avg_temp(abs_index)
-        f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0])
-        r_min_time, r_min_temp, r_max_time, r_max_temp = tuple(self._extrema[index, -1])
+        f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0, [0, 1, 4, 5]])
+        r_min_time, r_min_temp, r_inf_time, r_max_time, r_max_temp = tuple(self._extrema[index, -1, [0, 1, 2, 4, 5]])
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
         print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
+        print(f"The inflection point lagged by {(r_inf_time - f_max_time):.3f}s.")
 
 
     def extract_data(self, entry_row: NDArray[np.float64]):
@@ -380,14 +392,14 @@ class DataHandler():
 
         cycle_index, abs_index = self._find_chop_steady_index()
         entry_row[11] = np.average(self._temps[abs_index:])
-        entry_row[12], entry_row[13], entry_row[14], entry_row[15] = tuple(self._extrema[cycle_index, 0])
+        entry_row[12], entry_row[13], entry_row[14], entry_row[15] = tuple(self._extrema[cycle_index, 0, [0, 1, 4, 5]])
 
         f_max_time = self._extrema[cycle_index, 0, 2]
         f_max_time_i = cast(int, np.searchsorted(self._times, f_max_time))
         cor_r_temp = self._temps[f_max_time_i, -1]
         entry_row[16] = cor_r_temp # Temp at rear surface when front is at max
 
-        entry_row[17], entry_row[18], entry_row[19], entry_row[20] = tuple(self._extrema[cycle_index, -1])
+        entry_row[17], entry_row[18], entry_row[19], entry_row[21], entry_row[22] = tuple(self._extrema[cycle_index, -1, [0, 1, 2, 4, 5]])
 
 
     def close(self):

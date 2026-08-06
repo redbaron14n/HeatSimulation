@@ -32,6 +32,7 @@ BATCH_FMTS = {
     "Rear Temp [K]": "{:.3f}",
     "Rear Min Time [s]": "{:.3f}",
     "Rear Min Temp [K]": "{:.3f}",
+    "Rear Inf Time [s]": "{:.3f}",
     "Rear Max Time [s]": "{:.3f}",
     "Rear Max Temp [K]": "{:.3f}"
 }
@@ -244,6 +245,6 @@ chop_pers = 1.2, 1.5, 2.
 # chop_durs = 0.3, 1.
 # chop_pers = 1.2, 1.5, 2.
 
-run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=27, max_runtime=300.)
+run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=300.)
 
-# analyze_data("batch2/trial4.hdf5")
+# analyze_data("batch2/trial5.hdf5")
