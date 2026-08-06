@@ -14,6 +14,8 @@ from time import perf_counter
 
 np.set_printoptions(linewidth=200, threshold=10)
 
+ENERGY_TOL = 2.5e-4
+
 
 class FiniteDiffSolver1D:
 
@@ -453,7 +455,8 @@ class FiniteDiffSolver1D:
             saved: int,
             save_tol: float,
             time_tol: float,
-            chunk_size: int
+            chunk_size: int,
+            flush: bool = False
     ) -> int:
         
         rms_last = np.sqrt(np.mean((new_temps - buffer.last_saved)**2))
@@ -464,7 +467,7 @@ class FiniteDiffSolver1D:
             buffer.last_saved_time = time
             saved += 1
             buffer.size += 1
-        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or (time >= self._max_time):
+        if ((buffer.size != 0) and (buffer.size % chunk_size == 0)) or (time >= self._max_time) or flush:
             file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
             buffer.times.clear()
             buffer.temps.clear()
@@ -519,8 +522,8 @@ class FiniteDiffSolver1D:
             load_prev: bool = False,
             conv_tol: float = 1e-3,
             print_every: int = 100000,
-            save_tol: float = 5e-3,
-            time_tol: float = 1e-6,
+            save_tol: float = 1e-4,
+            time_tol: float = 1e-4,
             chunk_size: int = 1000,
             force_overwrite: bool = False
     ):
@@ -624,7 +627,7 @@ class FiniteDiffSolver1D:
             T_new = self._iterate_internal_temps(T_new, temps)
             temps = T_new
 
-            curr_cycle[cycle_indx] = T_new
+            curr_cycle[cycle_indx] = temps
             cycle_indx += 1
             if cycle_indx == cycle_ticks:
                 cycle_indx = 0
@@ -638,12 +641,28 @@ class FiniteDiffSolver1D:
                         post_cycles_rem -= 1
                 curr_cycle, prev_cycle = prev_cycle, curr_cycle
 
-            self._print_update(T_new, tick, sim_time, start_time, rms, saved, print_every)
-            if save_evo:
-                saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size)
+            rms_last_saved = np.sqrt(np.mean((temps - buffer.last_saved)**2))
+            if save_evo and (rms_last_saved >= save_tol) and (sim_time - buffer.last_saved_time >= time_tol):
+                buffer.times.append(sim_time)
+                buffer.last_saved_time = sim_time
+                buffer.temps.append(temps)
+                buffer.last_saved = temps
+                saved += 1
+                buffer.size += 1
+            if (buffer.size != 0) and (buffer.size - chunk_size == 0):
+                file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
+                buffer.times.clear()
+                buffer.temps.clear()
+                buffer.size = 0
 
-        if save_evo: # One last time after being done
-            saved = self._handle_snapshot_saving(file, buffer, T_new, sim_time, saved, save_tol, time_tol, chunk_size)
+            self._print_update(temps, tick, sim_time, start_time, rms, saved, print_every)
+
+        # Loop done
+        buffer.times.append(sim_time)
+        buffer.temps.append(temps)
+        saved += 1
+        file.append_snapshots(np.array(buffer.times), np.array(buffer.temps))
+
         self._final_temps = temps
         if save_final:
             file.init_temps = temps
