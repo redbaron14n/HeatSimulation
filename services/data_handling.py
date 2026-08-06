@@ -170,17 +170,23 @@ class DataHandler():
                 # Inflection
                 lo = min(min_indx, max_indx)
                 hi = max(min_indx, max_indx)
-                focus = col[lo:hi+1]
-                dt = np.diff(self._times[imin+lo:imin+hi+1])
-                dTdt = np.diff(focus) / dt
-                rel_indx = np.argmax(np.abs(dTdt))
-                inf_indx = lo + rel_indx + 1
+                if hi == lo:
+                    inf_time = np.nan
+                    inf_temp = np.nan
+                else:
+                    focus = col[lo:hi+1]
+                    dt = np.diff(self._times[imin+lo:imin+hi+1])
+                    dTdt = np.diff(focus) / dt
+                    rel_indx = np.argmax(np.abs(dTdt))
+                    inf_indx = lo + rel_indx + 1
+                    inf_time = self._times[imin + inf_indx]
+                    inf_temp = col[inf_indx]
                 
                 cycle_extrema[j] = (
                     self._times[imin + min_indx],
                     col[min_indx],
-                    self._times[imin + inf_indx],
-                    col[inf_indx],
+                    inf_time,
+                    inf_temp,
                     self._times[imin + max_indx],
                     col[max_indx]
                 )
@@ -363,7 +369,10 @@ class DataHandler():
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
         print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
-        print(f"The inflection point lagged by {(r_inf_time - f_max_time):.3f}s.")
+        if np.isnan(r_inf_time):
+            print(f"No measurable inflection point.")
+        else:
+            print(f"The inflection point lagged by {(r_inf_time - f_max_time):.3f}s.")
 
 
     def extract_data(self, entry_row: NDArray[np.float64]):

@@ -90,6 +90,7 @@ def analyze_data(filename: str):
     print_reports(data)
     time_evolution_plot(data)
     front_and_back_temp_plot(data)
+    position_plot(data)
     data.close()
 
 
@@ -245,6 +246,6 @@ chop_pers = 1.2, 1.5, 2.
 # chop_durs = 0.3, 1.
 # chop_pers = 1.2, 1.5, 2.
 
-run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=300.)
+run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=600.)
 
-# analyze_data("batch2/trial5.hdf5")
+# analyze_data("batch2/trial0.hdf5")

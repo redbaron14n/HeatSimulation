@@ -70,3 +70,42 @@ def front_and_back_temp_plot(data: DataHandler):
     ax.set_ylim(min_temp - temp_diff/10, max_temp + temp_diff/10)
     ax.grid(True)
     plt.show()
+
+
+def position_plot(data: DataHandler):
+
+    times = data.times
+    temps = data.temps
+    dx = data.length / (temps.shape[1] - 1)
+
+    
+    t_points = np.linspace(0., np.max(times), len(times))
+    fig, ax = plt.subplots(figsize = (10, 6))
+    [profile_line] = ax.plot(t_points, temps[:, 0])
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Temperature [K]")
+
+    min_temp, max_temp = np.min(temps), np.max(temps)
+    temp_diff = max_temp - min_temp
+    ax.set_ylim(min_temp - temp_diff/10, max_temp + temp_diff/10)
+    ax.set_title(f"Temperature evolution at x = 0mm")
+
+    slider_ax = fig.add_axes((0.2, 0.02, 0.6, 0.05))
+    pos_slider = Slider(
+        ax = slider_ax,
+        label = "Position Index",
+        valmin = 0,
+        valmax = temps.shape[1] - 1,
+        valinit = 0,
+        valstep = 1
+    )
+
+    def update(val: float):
+
+        index = int(pos_slider.val)
+        profile_line.set_ydata(temps[:, index])
+        ax.set_title(f"Temperature Profile at x = {(1000*dx*index):.2f}mm")
+        fig.canvas.draw_idle()
+
+    pos_slider.on_changed(update)
+    plt.show()
