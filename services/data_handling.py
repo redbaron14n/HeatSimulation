@@ -375,7 +375,7 @@ class DataHandler():
             print(f"The inflection point lagged by {(r_inf_time - f_max_time):.3f}s.")
 
 
-    def extract_data(self, entry_row: NDArray[np.float64]):
+    def extract_data(self, entry_row: NDArray[np.float64]) -> bool:
 
         """
         Fills a numpy array row with particular data from the simulation.
@@ -388,27 +388,39 @@ class DataHandler():
         if (self._extrema is None) or (self._temps is None) or (self._times is None):
             raise RuntimeError("Data has not been loaded.")
         
-        entry_row[1] = self._cond
-        entry_row[2] = self._diff
-        entry_row[3] = self._emis[0, 1]
-        entry_row[4] = np.max(self._htcs[:, 1])
-        entry_row[5] = self._htcs[0, 2]
-        entry_row[6] = self._length
-        entry_row[7] = np.max(self._gas_temps[:, 1])
-        entry_row[8] = self._temp_ambient
-        entry_row[9] = self._htcs[2, 0] # Chop duration
-        entry_row[10] = self._period
+        entry_row[2] = self._cond
+        entry_row[3] = self._diff
+        entry_row[4] = self._emis[0, 1]
+        entry_row[5] = np.max(self._htcs[:, 1])
+        entry_row[6] = self._htcs[0, 2]
+        entry_row[7] = self._length
+        entry_row[8] = np.max(self._gas_temps[:, 1])
+        entry_row[9] = self._temp_ambient
+        entry_row[10] = self._htcs[1, 0] # Chop duration
+        entry_row[11] = self._period
 
-        cycle_index, abs_index = self._find_chop_steady_index()
-        entry_row[11] = np.average(self._temps[abs_index:])
-        entry_row[12], entry_row[13], entry_row[14], entry_row[15] = tuple(self._extrema[cycle_index, 0, [0, 1, 4, 5]])
+        try:
+            cycle_index, abs_index = self._find_chop_steady_index()
+            entry_row[1] = 1
+        except RuntimeError:
+            cycle_index = abs_index = -1
+            entry_row[0] = 0
 
-        f_max_time = self._extrema[cycle_index, 0, 2]
-        f_max_time_i = cast(int, np.searchsorted(self._times, f_max_time))
-        cor_r_temp = self._temps[f_max_time_i, -1]
-        entry_row[16] = cor_r_temp # Temp at rear surface when front is at max
+        entry_row[12] = np.average(self._temps[abs_index:])
 
-        entry_row[17], entry_row[18], entry_row[19], entry_row[21], entry_row[22] = tuple(self._extrema[cycle_index, -1, [0, 1, 2, 4, 5]])
+        try:
+            entry_row[13], entry_row[14], entry_row[15], entry_row[16] = tuple(self._extrema[cycle_index, 0, [0, 1, 4, 5]])
+
+            f_max_time = self._extrema[cycle_index, 0, 2]
+            f_max_time_i = cast(int, np.searchsorted(self._times, f_max_time))
+            cor_r_temp = self._temps[f_max_time_i, -1]
+            entry_row[17] = cor_r_temp # Temp at rear surface when front is at max
+
+            entry_row[18], entry_row[19], entry_row[20], entry_row[21], entry_row[22] = tuple(self._extrema[cycle_index, -1, [0, 1, 2, 4, 5]])
+        except IndexError:
+            entry_row[13:] = -1
+            return True
+        return False
 
 
     def close(self):

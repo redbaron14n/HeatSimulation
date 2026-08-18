@@ -13,28 +13,29 @@ import pandas as pd
 
 
 BATCH_FMTS = {
-    "Trial": "{:.0f}",
-    "k [W/m/K]": "{:.3g}",
-    "alpha [m^2/s]": "{:.3g}",
-    "Emissivity": "{:.3g}",
-    "h_heat [W/m^2/K]": "{:.3g}",
-    "h_nat [W/m^2/K]": "{:.3g}",
-    "L [m]": "{:.3g}",
-    "Gas Temp [K]": "{:.3f}",
-    "Ambient Temp [K]": "{:.3f}",
-    "Chop Duration [s]": "{:.3f}",
-    "Chop Period [s]": "{:.3f}",
-    "Avg Temp [K]": "{:.3f}",
-    "Front Min Time [s]": "{:.3f}",
-    "Front Min Temp [K]": "{:.3f}",
-    "Front Max Time [s]": "{:.3f}",
-    "Front Max Temp [K]": "{:.3f}",
-    "Rear Temp [K]": "{:.3f}",
-    "Rear Min Time [s]": "{:.3f}",
-    "Rear Min Temp [K]": "{:.3f}",
-    "Rear Inf Time [s]": "{:.3f}",
-    "Rear Max Time [s]": "{:.3f}",
-    "Rear Max Temp [K]": "{:.3f}"
+    "Trial": "{:.0f}",              # 0
+    "Converged": "{:.0f}",          # 1
+    "k [W/m/K]": "{:.3g}",          # 2
+    "alpha [m^2/s]": "{:.3g}",      # 3
+    "Emissivity": "{:.3g}",         # 4
+    "h_heat [W/m^2/K]": "{:.3g}",   # 5
+    "h_nat [W/m^2/K]": "{:.3g}",    # 6
+    "L [m]": "{:.3g}",              # 7
+    "Gas Temp [K]": "{:.3f}",       # 8
+    "Ambient Temp [K]": "{:.3f}",   # 9
+    "Chop Duration [s]": "{:.3f}",  # 10
+    "Chop Period [s]": "{:.3f}",    # 11
+    "Avg Temp [K]": "{:.3f}",       # 12
+    "Front Min Time [s]": "{:.3f}", # 13
+    "Front Min Temp [K]": "{:.3f}", # 14
+    "Front Max Time [s]": "{:.3f}", # 15
+    "Front Max Temp [K]": "{:.3f}", # 16
+    "Rear Temp [K]": "{:.3f}",      # 17
+    "Rear Min Time [s]": "{:.3f}",  # 18
+    "Rear Min Temp [K]": "{:.3f}",  # 19
+    "Rear Inf Time [s]": "{:.3f}",  # 20
+    "Rear Max Time [s]": "{:.3f}",  # 21
+    "Rear Max Temp [K]": "{:.3f}"   # 22
 }
 
 
@@ -65,7 +66,7 @@ def run_configuration(
         htc = np.max(htcs_kernel[:, 1])
         max_sim_time = 3 * cond * length / (diff * htc) + 400. # Based on fitting simulated data + tolerance
     solver = FiniteDiffSolver1D(system, init_temps, gas_temp_kernel, htcs_kernel, period, ambient_temp, x_res, min_sim_time, max_sim_time, diff_num, max_t_step_size=max_t_step)
-    solver.run_simulation(filename, print_every=print_every, force_overwrite=force_overwrite, max_runtime=max_runtime)
+    solver.run_simulation(filename, print_every=print_every, force_overwrite=force_overwrite, max_runtime=max_runtime, conv_tol=1e-3)
 
 
 def get_final_temps(filename: str) -> NDArray[np.float64]:
@@ -87,7 +88,7 @@ def analyze_data(filename: str):
 
     data = DataHandler(filename)
     data.load_data()
-    print_reports(data)
+    # print_reports(data)
     time_evolution_plot(data)
     front_and_back_temp_plot(data)
     position_plot(data)
@@ -110,6 +111,7 @@ def run_mini(
         max_t_step: float=1e-4,
         diff_num: float=0.1,
         max_sim_time: float | None = None,
+        min_sim_time: float = 10.,
         max_runtime: float | None = None,
         x_res: int=25
 ):
@@ -132,6 +134,7 @@ def run_mini(
         ambient_temp=ambi,
         init_temps=init_temps,
         max_sim_time=max_sim_time,
+        min_sim_time=min_sim_time,
         max_t_step=max_t_step,
         diff_num=diff_num,
         print_every=print_every,
@@ -156,6 +159,7 @@ def run_batch(
         start_at: int=0,
         rerun: list[int] | None = None,
         max_sim_time: float | None = None,
+        min_sim_time: float = 10.,
         max_runtime: float | None = None
 ):
 
@@ -173,7 +177,7 @@ def run_batch(
         print(f"Trial {trial}, Cond: {cond}, Diff: {diff}, Emis: {emis}, h_heat: {h_heat}, h_nat: {h_nat}, length: {length}, gas: {gas}, ambi: {ambi}, dur: {dur}, per: {per}")
         filename = f"{subdir}/trial{trial}.hdf5"
         try:
-            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=max_sim_time, max_runtime=max_runtime)
+            run_mini(filename, cond, diff, emis, h_heat, h_nat, length, gas, ambi, dur, per, max_sim_time=max_sim_time, min_sim_time=min_sim_time, max_runtime=max_runtime)
             data = DataHandler(filename)
             data.load_data()
             print_reports(data)
@@ -205,17 +209,21 @@ def extract_data_from_batch(subdirectory: str, files_basename: str, data_filenam
 
     if not files:
         raise FileNotFoundError(f"No data/{subdirectory}/{files_basename}*.hdf5 files found.")
-    
+    fail_list: list[int] = []
     data_list: list[NDArray[np.float64]] = []
     for path in files:
         entry = np.empty(len(BATCH_FMTS), dtype=np.float64)
-        entry[0] = int(path.stem[l:])
+        trial_num = int(path.stem[l:])
+        entry[0] = trial_num
         rel_path = path.relative_to("data")
         data = DataHandler(str(rel_path))
         data.load_data()
-        data.extract_data(entry)
+        failed = data.extract_data(entry)
+        if failed:
+            fail_list.append(trial_num)
         data.close()
         data_list.append(entry)
+    print(fail_list)
     data_array = np.asarray(data_list)
     df = pd.DataFrame(data_array, columns=list(BATCH_FMTS))
     df_formatted = df.copy()
@@ -246,6 +254,8 @@ chop_pers = 1.2, 1.5, 2.
 # chop_durs = 0.3, 1.
 # chop_pers = 1.2, 1.5, 2.
 
-run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=600.)
+run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=300., min_sim_time=6.)
 
-# analyze_data("batch2/trial0.hdf5")
+# analyze_data("batch2/trial21.hdf5")
+
+extract_data_from_batch("batch2", "trial", "batch2_data.csv")
