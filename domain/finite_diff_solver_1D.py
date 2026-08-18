@@ -29,7 +29,7 @@ class FiniteDiffSolver1D:
             min_sim_time: float = 0.0,
             max_sim_time: float = 100.0,
             diff_num: float = 0.1,
-            max_t_step_size: float = 1e-3
+            max_t_step_size: float = 1e-4,
         ):
 
         """
@@ -43,7 +43,7 @@ class FiniteDiffSolver1D:
         :param min_sim_time: The minimum simulation time to run the solver for [s].
         :param max_sim_time: The maximum simulation time to run the solver for [s].
         :param diff_num: The diffusion number (alpha * dt / dx^2) to use for numerical stability.
-        :param max_t_step_size: The maximum time step [s] that may be set. Stability may call for lower, but it may not be greater than this. Default is 1e-3.
+        :param max_t_step_size: The maximum time step [s] that may be set. Stability may call for lower, but it may not be greater than this. Default is 1e-4.
         """
 
         self.system = system
@@ -217,6 +217,7 @@ class FiniteDiffSolver1D:
         if min_time < 0.0:
             raise ValueError("Minimum simulation time must be non-negative.")
         self._min_time = min_time
+        self._update_tick_count()
 
 
     @property
@@ -237,7 +238,7 @@ class FiniteDiffSolver1D:
         elif max_time <= self._min_time:
             raise ValueError("Maximum simulation time must be greater than minimum simulation time.")
         self._max_time = max_time
-        self._update_t_step() # Update t_step based on new max_time
+        self._update_tick_count()
 
 
     @property
@@ -273,7 +274,7 @@ class FiniteDiffSolver1D:
     def max_t_step(self, size: float):
 
         if size <= 0.:
-            raise ValueError("The maximum step size allowed must be positive. Attempted: {size}.")
+            raise ValueError(f"The maximum step size allowed must be positive. Attempted: {size}.")
         self._max_t_step = size
         self._update_t_step()
 
@@ -299,7 +300,7 @@ class FiniteDiffSolver1D:
 
     def _update_t_step(self):
 
-        if not hasattr(self, '_max_t_step'):
+        if not(hasattr(self, '_max_t_step')):
             return
         size = self._diff_num * (self._x_step ** 2) / self._system.diffusivity
         if size < self._max_t_step:
@@ -314,7 +315,8 @@ class FiniteDiffSolver1D:
 
         if not hasattr(self, '_t_step'):
             return
-        self._tick_count = int(self._max_time / self._t_step) + 1
+        self._max_tick_count = int(self._max_time / self._t_step) + 1
+        self._min_tick_count = int(self._min_time / self._t_step) + 1
     
 
     def _root_selector(self, roots_T: NDArray[np.complexfloating] | NDArray[np.floating]) -> float:
@@ -373,13 +375,6 @@ class FiniteDiffSolver1D:
         cond_terms = self._diff_num * (right - 2 * internal_t + left)
         T_new[1: -1] = internal_t + cond_terms
         return T_new
-
-
-    def _check_convergence(self, T_new: NDArray[np.float64], T_old: NDArray[np.float64], conv_tol: float, sim_time: float) -> tuple[bool, float]:
-
-        rms = np.sqrt(((T_new - T_old)**2).mean())
-        finished = (rms <= conv_tol) and (sim_time >= self._min_time)
-        return finished, rms
     
 
     def _print_update(self, temps: NDArray[np.float64], tick: int, sim_time: float, start_time: float, rms: float, saved: int, print_every: int):
@@ -557,7 +552,8 @@ class FiniteDiffSolver1D:
         cycle_ticks = int(round(self._period / self._t_step))
         prev_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
         curr_cycle = np.empty((cycle_ticks, self._x_res), dtype=np.float64)
-        cycle_indx = cycles_completed = post_cycles_rem = 0
+        cycle_indx = cycles_completed = 0
+        post_cycles_rem = 2
         buffer = SnapshotBuffer(times=[0.], temps=[temps.copy()], size=1, last_saved=temps.copy(), last_saved_time=0.)
         saved = 1
         rms = -1.
@@ -582,7 +578,11 @@ class FiniteDiffSolver1D:
         converged = False
         tick = 0
         start_time = perf_counter()
-        while not(converged and (post_cycles_rem == 0)) and (tick < self._tick_count) and (perf_counter() - start_time < max_runtime if max_runtime is not None else True):
+        while (
+            (post_cycles_rem > 0 or tick < self._min_tick_count)
+            and ((perf_counter() - start_time < max_runtime if max_runtime is not None else True) or tick < self._min_tick_count)
+            and (tick < self._max_tick_count)
+        ):
 
             tick += 1
             sim_time = tick * self._t_step
@@ -634,15 +634,12 @@ class FiniteDiffSolver1D:
                 cycles_completed += 1
                 if cycles_completed > 1:
                     rms = np.sqrt(np.mean((curr_cycle - prev_cycle)**2))
-                    if (not converged) and (rms < conv_tol):
-                        converged = True
-                        post_cycles_rem = 2
-                    elif converged:
+                    if (post_cycles_rem > 0) and (rms < conv_tol):
                         post_cycles_rem -= 1
                 curr_cycle, prev_cycle = prev_cycle, curr_cycle
 
             rms_last_saved = np.sqrt(np.mean((temps - buffer.last_saved)**2))
-            if save_evo and (rms_last_saved >= save_tol) and (sim_time - buffer.last_saved_time >= time_tol):
+            if save_evo and (((rms_last_saved >= save_tol) and (sim_time - buffer.last_saved_time >= time_tol)) or (sim_time - buffer.last_saved_time >= 1e-4)):
                 buffer.times.append(sim_time)
                 buffer.last_saved_time = sim_time
                 buffer.temps.append(temps)
