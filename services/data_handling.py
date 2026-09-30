@@ -12,7 +12,7 @@ import numpy as np
 
 DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
-CHOP_CONV_TOL = 1e-3
+CHOP_CONV_TOL = 5e-3
 CYCLE_WINDOW = (-0.1, 0.9)
 
 
@@ -139,33 +139,44 @@ class DataHandler():
         extrema: list[NDArray[np.float64]] = []
         max_time: float = max(self._times)
         cycles = int(max_time // self._period)
+        max_time_index: int = self._temps.shape[0] - 1
         for i in range(cycles):
-            tmin = max(0., (i+CYCLE_WINDOW[0])*self._period)
-            imin = np.searchsorted(self._times, tmin, side="left")
-            tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
-            imax = np.searchsorted(self._times, tmax, side="right")
+
+            # tmin = max(0., (i+CYCLE_WINDOW[0])*self._period)
+            tmin = i*self._period
+            imin = max(np.searchsorted(self._times, tmin, side="left") - 5, 0)
+            # tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
+            tmax = (i+1)*self._period
+            imax = min(np.searchsorted(self._times, tmax, side="right") + 5, max_time_index)
             temps = self._temps[imin:imax]
 
-            n_points = temps.shape[1]
+            n_points = temps.shape[1] # x_res
             cycle_extrema = np.empty((n_points, 6), dtype=np.float64)
             for j in range(n_points):
-                col = temps[:, j]
+                cycle = temps[:, j] # temp evolution within cycle for given depth
+
+                if (i >= 75) and (j == n_points-1):
+                    pass
 
                 # Minimum
-                min_mask = ((col[1:-1] < col[:-2]) & (col[1:-1] < col[2:]))
-                local = np.where(min_mask)[0] + 1
+                min_mask = ((cycle[1:-1] < cycle[:-2]) & (cycle[1:-1] < cycle[2:]))
+                local = np.where(min_mask)[0] + 1 # finds index of first local minimum
                 if len(local):
-                    min_indx = local[col[local].argmin()]
+                    if (i == 75) and (j == n_points-1):
+                        index_value_array = np.column_stack((local, cycle[local]))
+                        print(index_value_array)
+                        print(local[cycle[local].argmin()])
+                    min_indx = local[cycle[local].argmin()]
                 else:
-                    min_indx = np.argmin(col)
+                    min_indx = np.argmin(cycle)
                 
                 # Maximum
-                max_mask = ((col[1:-1] > col[:-2]) & (col[1:-1] > col[2:]))
+                max_mask = ((cycle[1:-1] > cycle[:-2]) & (cycle[1:-1] > cycle[2:]))
                 local = np.where(max_mask)[0] + 1
                 if len(local):
-                    max_indx = local[col[local].argmax()]
+                    max_indx = local[cycle[local].argmax()]
                 else:
-                    max_indx = np.argmax(col)
+                    max_indx = np.argmax(cycle)
 
                 # Inflection
                 lo = min(min_indx, max_indx)
@@ -174,21 +185,21 @@ class DataHandler():
                     inf_time = np.nan
                     inf_temp = np.nan
                 else:
-                    focus = col[lo:hi+1]
+                    focus = cycle[lo:hi+1]
                     dt = np.diff(self._times[imin+lo:imin+hi+1])
                     dTdt = np.diff(focus) / dt
                     rel_indx = np.argmax(np.abs(dTdt))
                     inf_indx = lo + rel_indx + 1
                     inf_time = self._times[imin + inf_indx]
-                    inf_temp = col[inf_indx]
+                    inf_temp = cycle[inf_indx]
                 
                 cycle_extrema[j] = (
                     self._times[imin + min_indx],
-                    col[min_indx],
+                    cycle[min_indx],
                     inf_time,
                     inf_temp,
                     self._times[imin + max_indx],
-                    col[max_indx]
+                    cycle[max_indx]
                 )
             extrema.append(cycle_extrema)
         self._extrema = np.array(extrema)
@@ -404,7 +415,7 @@ class DataHandler():
             entry_row[1] = 1
         except RuntimeError:
             cycle_index = abs_index = -1
-            entry_row[0] = 0
+            entry_row[1] = 0
 
         entry_row[12] = np.average(self._temps[abs_index:])
 
