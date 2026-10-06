@@ -14,6 +14,7 @@ DIRECTORY = "Data/"
 FORBIDDEN = "<>:\"|?*"
 CHOP_CONV_TOL = 5e-3
 CYCLE_WINDOW = (-0.1, 0.9)
+TEMP_THRESHOLD = 1. # Minimum difference between temperatures to be considered viable
 
 
 class DataHandler():
@@ -132,75 +133,150 @@ class DataHandler():
                 print("Unknown input. Try again.")
 
 
+    # def _set_extrema(self):
+
+    #     if (self._times is None) or (self._temps is None):
+    #         raise ValueError("Data has not been loaded.")
+    #     extrema: list[NDArray[np.float64]] = []
+    #     max_time: float = max(self._times)
+    #     cycles = int(max_time // self._period)
+    #     max_time_index: int = self._temps.shape[0] - 1
+    #     for i in range(cycles):
+
+    #         # tmin = max(0., (i+CYCLE_WINDOW[0])*self._period)
+    #         tmin = i*self._period
+    #         imin = max(np.searchsorted(self._times, tmin, side="left") - 5, 0)
+    #         # tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
+    #         tmax = (i+1)*self._period
+    #         imax = min(np.searchsorted(self._times, tmax, side="right") + 5, max_time_index)
+    #         temps = self._temps[imin:imax]
+
+    #         n_points = temps.shape[1] # x_res
+    #         cycle_extrema = np.empty((n_points, 6), dtype=np.float64)
+    #         for j in range(n_points):
+    #             cycle = temps[:, j] # temp evolution within cycle for given depth
+
+    #             if (i >= 75) and (j == n_points-1):
+    #                 pass
+
+    #             # Minimum
+    #             min_mask = ((cycle[1:-1] < cycle[:-2]) & (cycle[1:-1] < cycle[2:]))
+    #             local = np.where(min_mask)[0] + 1 # finds index of first local minimum
+    #             if len(local):
+    #                 if (i == 75) and (j == n_points-1):
+    #                     index_value_array = np.column_stack((local, cycle[local]))
+    #                     print(index_value_array)
+    #                     print(local[cycle[local].argmin()])
+    #                 min_indx = local[cycle[local].argmin()]
+    #             else:
+    #                 min_indx = np.argmin(cycle)
+                
+    #             # Maximum
+    #             max_mask = ((cycle[1:-1] > cycle[:-2]) & (cycle[1:-1] > cycle[2:]))
+    #             local = np.where(max_mask)[0] + 1
+    #             if len(local):
+    #                 max_indx = local[cycle[local].argmax()]
+    #             else:
+    #                 max_indx = np.argmax(cycle)
+
+    #             # Inflection
+    #             lo = min(min_indx, max_indx)
+    #             hi = max(min_indx, max_indx)
+    #             if hi == lo:
+    #                 inf_time = np.nan
+    #                 inf_temp = np.nan
+    #             else:
+    #                 focus = cycle[lo:hi+1]
+    #                 dt = np.diff(self._times[imin+lo:imin+hi+1])
+    #                 dTdt = np.diff(focus) / dt
+    #                 rel_indx = np.argmax(np.abs(dTdt))
+    #                 inf_indx = lo + rel_indx + 1
+    #                 inf_time = self._times[imin + inf_indx]
+    #                 inf_temp = cycle[inf_indx]
+                
+    #             cycle_extrema[j] = (
+    #                 self._times[imin + min_indx],
+    #                 cycle[min_indx],
+    #                 inf_time,
+    #                 inf_temp,
+    #                 self._times[imin + max_indx],
+    #                 cycle[max_indx]
+    #             )
+    #         extrema.append(cycle_extrema)
+    #     self._extrema = np.array(extrema)
+
+
     def _set_extrema(self):
 
         if (self._times is None) or (self._temps is None):
-            raise ValueError("Data has not been loaded.")
+            raise ValueError("Data has not been loaded")
+
         extrema: list[NDArray[np.float64]] = []
-        max_time: float = max(self._times)
+        max_time = max(self._times)
         cycles = int(max_time // self._period)
-        max_time_index: int = self._temps.shape[0] - 1
-        for i in range(cycles):
+        max_time_index = self._times.shape[0] - 1
+        n_points = self._temps.shape[1]
+        for i in range(1, cycles):
 
-            # tmin = max(0., (i+CYCLE_WINDOW[0])*self._period)
-            tmin = i*self._period
-            imin = max(np.searchsorted(self._times, tmin, side="left") - 5, 0)
-            # tmax = min(max_time, (i+CYCLE_WINDOW[1])*self._period)
-            tmax = (i+1)*self._period
-            imax = min(np.searchsorted(self._times, tmax, side="right") + 5, max_time_index)
-            temps = self._temps[imin:imax]
+            cycle_tmin = i*self._period
+            cycle_imin = max(np.searchsorted(self._times, cycle_tmin, side="left") - 5, 0)
+            cycle_tmax = (i+0.9)*self._period
+            cycle_imax = min(np.searchsorted(self._times, cycle_tmax, side="right") + 5, max_time_index)
 
-            n_points = temps.shape[1] # x_res
+            cycle_temps = self._temps[cycle_imin:cycle_imax] # 2D array
             cycle_extrema = np.empty((n_points, 6), dtype=np.float64)
-            for j in range(n_points):
-                cycle = temps[:, j] # temp evolution within cycle for given depth
 
-                if (i >= 75) and (j == n_points-1):
-                    pass
+            for x in range(n_points): # Identify maximum at each x-value
 
-                # Minimum
-                min_mask = ((cycle[1:-1] < cycle[:-2]) & (cycle[1:-1] < cycle[2:]))
-                local = np.where(min_mask)[0] + 1 # finds index of first local minimum
-                if len(local):
-                    if (i == 75) and (j == n_points-1):
-                        index_value_array = np.column_stack((local, cycle[local]))
-                        print(index_value_array)
-                        print(local[cycle[local].argmin()])
-                    min_indx = local[cycle[local].argmin()]
-                else:
-                    min_indx = np.argmin(cycle)
-                
+                cycle = cycle_temps[:, x] # 1D array
+
                 # Maximum
                 max_mask = ((cycle[1:-1] > cycle[:-2]) & (cycle[1:-1] > cycle[2:]))
-                local = np.where(max_mask)[0] + 1
-                if len(local):
-                    max_indx = local[cycle[local].argmax()]
+                local_max = np.where(max_mask)[0] + 1 # +1 to account for slicing in previous step
+                if len(local_max):
+                    max_index = local_max[cycle[local_max].argmax()]
                 else:
-                    max_indx = np.argmax(cycle)
+                    max_index = np.argmax(cycle)
+                local_max_time: float = self._times[cycle_imin + max_index]
+                local_max_temp = cycle[max_index]
+
+                # Refocus - relevant local minimum and inflection point will be between this local max and the next
+                subcycle_tmin = local_max_time
+                subcycle_imin = max(np.searchsorted(self._times, subcycle_tmin, side="left") - 5, 0)
+                subcycle_tmax = local_max_time + self._period
+                subcycle_imax = min(np.searchsorted(self._times, subcycle_tmax, side="right") + 5, max_time_index)
+
+                subcycle = self._temps[subcycle_imin:subcycle_imax, x]
+
+                # Minimum
+                min_mask = ((subcycle[1:-1] < subcycle[:-2]) & (subcycle[1:-1] < subcycle[2:]))
+                local_min = np.where(min_mask)[0] + 1
+                if len(local_min):
+                    min_index = local_min[subcycle[local_min].argmin()]
+                else:
+                    min_index = np.argmin(subcycle)
+                abs_min_index = subcycle_imin + min_index
+                local_min_time: float = self._times[abs_min_index]
+                local_min_temp = subcycle[min_index]
 
                 # Inflection
-                lo = min(min_indx, max_indx)
-                hi = max(min_indx, max_indx)
-                if hi == lo:
-                    inf_time = np.nan
-                    inf_temp = np.nan
+                if local_max_temp < local_min_temp + TEMP_THRESHOLD:
+                    inf_time = inf_temp = -1.
                 else:
-                    focus = cycle[lo:hi+1]
-                    dt = np.diff(self._times[imin+lo:imin+hi+1])
-                    dTdt = np.diff(focus) / dt
-                    rel_indx = np.argmax(np.abs(dTdt))
-                    inf_indx = lo + rel_indx + 1
-                    inf_time = self._times[imin + inf_indx]
-                    inf_temp = cycle[inf_indx]
-                
-                cycle_extrema[j] = (
-                    self._times[imin + min_indx],
-                    cycle[min_indx],
-                    inf_time,
-                    inf_temp,
-                    self._times[imin + max_indx],
-                    cycle[max_indx]
-                )
+                    subcycle = subcycle[:min_index] # Prevents catching rising inflection
+                    dt = np.diff(self._times[subcycle_imin:abs_min_index])
+                    dTdt = np.diff(subcycle) / dt
+                    inf_index = np.argmax(np.absolute(dTdt))
+                    inf_time: float = self._times[subcycle_imin + inf_index]
+                    inf_temp = subcycle[inf_index]
+
+                cycle_extrema[x, 0] = local_min_time
+                cycle_extrema[x, 1] = local_min_temp
+                cycle_extrema[x, 2] = inf_time
+                cycle_extrema[x, 3] = inf_temp
+                cycle_extrema[x, 4] = local_max_time
+                cycle_extrema[x, 5] = local_max_temp
+
             extrema.append(cycle_extrema)
         self._extrema = np.array(extrema)
 
@@ -422,7 +498,7 @@ class DataHandler():
         try:
             entry_row[13], entry_row[14], entry_row[15], entry_row[16] = tuple(self._extrema[cycle_index, 0, [0, 1, 4, 5]])
 
-            f_max_time = self._extrema[cycle_index, 0, 2]
+            f_max_time = self._extrema[cycle_index, 0, 4]
             f_max_time_i = cast(int, np.searchsorted(self._times, f_max_time))
             cor_r_temp = self._temps[f_max_time_i, -1]
             entry_row[17] = cor_r_temp # Temp at rear surface when front is at max
