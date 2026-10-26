@@ -13,29 +13,30 @@ import pandas as pd
 
 
 BATCH_FMTS = {
-    "Trial": "{:.0f}",              # 0
-    "Converged": "{:.0f}",          # 1
-    "k [W/m/K]": "{:.3g}",          # 2
-    "alpha [m^2/s]": "{:.3g}",      # 3
-    "Emissivity": "{:.3g}",         # 4
-    "h_heat [W/m^2/K]": "{:.3g}",   # 5
-    "h_nat [W/m^2/K]": "{:.3g}",    # 6
-    "L [m]": "{:.3g}",              # 7
-    "Gas Temp [K]": "{:.3f}",       # 8
-    "Ambient Temp [K]": "{:.3f}",   # 9
-    "Chop Duration [s]": "{:.3f}",  # 10
-    "Chop Period [s]": "{:.3f}",    # 11
-    "Avg Temp [K]": "{:.3f}",       # 12
-    "Front Min Time [s]": "{:.3f}", # 13
-    "Front Min Temp [K]": "{:.3f}", # 14
-    "Front Max Time [s]": "{:.3f}", # 15
-    "Front Max Temp [K]": "{:.3f}", # 16
-    "Rear Temp [K]": "{:.3f}",      # 17
-    "Rear Min Time [s]": "{:.3f}",  # 18
-    "Rear Min Temp [K]": "{:.3f}",  # 19
-    "Rear Inf Time [s]": "{:.3f}",  # 20
-    "Rear Max Time [s]": "{:.3f}",  # 21
-    "Rear Max Temp [K]": "{:.3f}"   # 22
+    "Trial": "{:.0f}",                  # 0
+    "Converged": "{:.0f}",              # 1
+    "k [W/m/K]": "{:.3g}",              # 2
+    "alpha [m^2/s]": "{:.3g}",          # 3
+    "Emissivity": "{:.3g}",             # 4
+    "h_heat [W/m^2/K]": "{:.3g}",       # 5
+    "h_nat [W/m^2/K]": "{:.3g}",        # 6
+    "L [m]": "{:.3g}",                  # 7
+    "Gas Temp [K]": "{:.3f}",           # 8
+    "Ambient Temp [K]": "{:.3f}",       # 9
+    "Chop Duration [s]": "{:.3f}",      # 10
+    "Chop Period [s]": "{:.3f}",        # 11
+    "Avg Temp [K]": "{:.3f}",           # 12
+    "Front Min Time [s]": "{:.3f}",     # 13
+    "Front Min Temp [K]": "{:.3f}",     # 14
+    "Front Max Time [s]": "{:.3f}",     # 15
+    "Front Max Temp [K]": "{:.3f}",     # 16
+    "Rear Temp [K]": "{:.3f}",          # 17
+    "Rear Min Time [s]": "{:.3f}",      # 18
+    "Rear Min Temp [K]": "{:.3f}",      # 19
+    "Rear Inf Time [s]": "{:.3f}",      # 20
+    "Rear Half-Max Time [s]": "{:.3f}", # 21
+    "Rear Max Time [s]": "{:.3f}",      # 22
+    "Rear Max Temp [K]": "{:.3f}"       # 23
 }
 
 
@@ -80,6 +81,14 @@ def get_final_temps(filename: str) -> NDArray[np.float64]:
 
 def print_reports(data: DataHandler):
 
+    diff, time_blocked, length = data._diff, data._htcs[1, 0], data._length
+    fourier = diff * time_blocked / (length**2)
+
+    cond, htc = data._cond, data._htcs[1, 1]
+    biot = htc * length / cond
+
+    print(f"Diff: {diff}, Tb: {time_blocked}, length: {length}, Fourier: {fourier}")
+    print(f"Cond: {cond}, htc: {htc}, Biot: {biot}")
     data.report_convergence_time()
     data.report_lag_time()
 
@@ -88,7 +97,10 @@ def analyze_data(filename: str):
 
     data = DataHandler(filename)
     data.load_data()
-    # print_reports(data)
+    try:
+        print_reports(data)
+    except:
+        print("Error getting data")
     time_evolution_plot(data)
     front_and_back_temp_plot(data)
     position_plot(data)
@@ -254,8 +266,8 @@ chop_pers = 1.2, 1.5, 2.
 # chop_durs = 0.3, 1.
 # chop_pers = 1.2, 1.5, 2.
 
-run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=300., min_sim_time=6.)
+# run_batch("batch2", conds, diffs, emiss, h_heats, h_nats, lengths, gas_temps, ambi_temps, chop_durs, chop_pers, start_at=0, max_runtime=100., min_sim_time=0., rerun=[0])
 
-# analyze_data("batch2/trial21.hdf5")
+# analyze_data("batch2/trial845.hdf5")
 
-extract_data_from_batch("batch2", "trial", "batch2_data.csv")
+extract_data_from_batch("batch2", "trial", "batch2_data2.csv")

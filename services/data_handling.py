@@ -224,7 +224,7 @@ class DataHandler():
             cycle_imax = min(np.searchsorted(self._times, cycle_tmax, side="right") + 5, max_time_index)
 
             cycle_temps = self._temps[cycle_imin:cycle_imax] # 2D array
-            cycle_extrema = np.empty((n_points, 6), dtype=np.float64)
+            cycle_extrema = np.empty((n_points, 8), dtype=np.float64)
 
             for x in range(n_points): # Identify maximum at each x-value
 
@@ -238,12 +238,12 @@ class DataHandler():
                 else:
                     max_index = np.argmax(cycle)
                 local_max_time: float = self._times[cycle_imin + max_index]
-                local_max_temp = cycle[max_index]
+                local_max_temp: float = cycle[max_index]
 
                 # Refocus - relevant local minimum and inflection point will be between this local max and the next
                 subcycle_tmin = local_max_time
                 subcycle_imin = max(np.searchsorted(self._times, subcycle_tmin, side="left") - 5, 0)
-                subcycle_tmax = local_max_time + self._period
+                subcycle_tmax = local_max_time + self._period # This extends beyond current cycle, thus why self._times is called again
                 subcycle_imax = min(np.searchsorted(self._times, subcycle_tmax, side="right") + 5, max_time_index)
 
                 subcycle = self._temps[subcycle_imin:subcycle_imax, x]
@@ -257,25 +257,36 @@ class DataHandler():
                     min_index = np.argmin(subcycle)
                 abs_min_index = subcycle_imin + min_index
                 local_min_time: float = self._times[abs_min_index]
-                local_min_temp = subcycle[min_index]
+                local_min_temp: float = subcycle[min_index]
 
                 # Inflection
+                subcycle = subcycle[:min_index] # Prevents catching rising inflection
                 if local_max_temp < local_min_temp + TEMP_THRESHOLD:
                     inf_time = inf_temp = -1.
                 else:
-                    subcycle = subcycle[:min_index] # Prevents catching rising inflection
                     dt = np.diff(self._times[subcycle_imin:abs_min_index])
                     dTdt = np.diff(subcycle) / dt
                     inf_index = np.argmax(np.absolute(dTdt))
                     inf_time: float = self._times[subcycle_imin + inf_index]
                     inf_temp = subcycle[inf_index]
 
+                # Half-max
+                if local_max_temp < local_min_temp + TEMP_THRESHOLD:
+                    halfway_time = halfway_temp = -1.
+                else:
+                    halfway_temp = (local_max_temp + local_min_temp) / 2
+                    mask = (subcycle <= halfway_temp)
+                    halfway_index = np.argmax(mask)
+                    halfway_time: float = self._times[subcycle_imin + halfway_index]
+                
                 cycle_extrema[x, 0] = local_min_time
                 cycle_extrema[x, 1] = local_min_temp
                 cycle_extrema[x, 2] = inf_time
                 cycle_extrema[x, 3] = inf_temp
-                cycle_extrema[x, 4] = local_max_time
-                cycle_extrema[x, 5] = local_max_temp
+                cycle_extrema[x, 4] = halfway_time
+                cycle_extrema[x, 5] = halfway_temp
+                cycle_extrema[x, 6] = local_max_time
+                cycle_extrema[x, 7] = local_max_temp
 
             extrema.append(cycle_extrema)
         self._extrema = np.array(extrema)
@@ -451,15 +462,19 @@ class DataHandler():
             raise ValueError("Data has not been loaded.")
         index, abs_index = self._find_chop_steady_index()
         self.report_final_avg_temp(abs_index)
-        f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0, [0, 1, 4, 5]])
-        r_min_time, r_min_temp, r_inf_time, r_max_time, r_max_temp = tuple(self._extrema[index, -1, [0, 1, 2, 4, 5]])
+        f_min_time, f_min_temp, f_max_time, f_max_temp = tuple(self._extrema[index, 0, [0, 1, 6, 7]])
+        r_min_time, r_min_temp, r_inf_time, r_half_time, r_max_time, r_max_temp = tuple(self._extrema[index, -1, [0, 1, 2, 4, 6, 7]])
         print(f"The front temperature fell {(f_max_temp-f_min_temp):.3f}K from {f_max_temp:.3f}K at t={f_max_time:.3f}s to {f_min_temp:.3f}K at t={f_min_time:.3f}s over {(f_min_time-f_max_time):.3f}s.")
         print(f"The rear temperature fell {(r_max_temp-r_min_temp):.3f}K from {r_max_temp:.3f}K at t={r_max_time:.3f}s to {r_min_temp:.3f}K at t={r_min_time:.3f}s over {(r_min_time-r_max_time):.3f}s.")
         print(f"The max temperatures lagged by {(r_max_time-f_max_time):.3f}s and the min temperatures by {(r_min_time-f_min_time):.3f}s.")
-        if np.isnan(r_inf_time):
+        if r_inf_time == -1.:
             print(f"No measurable inflection point.")
         else:
             print(f"The inflection point lagged by {(r_inf_time - f_max_time):.3f}s.")
+        if r_half_time == -1.:
+            print(f"No measurable halfway point.")
+        else:
+            print(f"The halfway point lagged by {(r_half_time - f_max_time):.3f}s.")
 
 
     def extract_data(self, entry_row: NDArray[np.float64]) -> bool:
@@ -496,14 +511,14 @@ class DataHandler():
         entry_row[12] = np.average(self._temps[abs_index:])
 
         try:
-            entry_row[13], entry_row[14], entry_row[15], entry_row[16] = tuple(self._extrema[cycle_index, 0, [0, 1, 4, 5]])
+            entry_row[13:17] = tuple(self._extrema[cycle_index, 0, [0, 1, 6, 7]])
 
             f_max_time = self._extrema[cycle_index, 0, 4]
             f_max_time_i = cast(int, np.searchsorted(self._times, f_max_time))
             cor_r_temp = self._temps[f_max_time_i, -1]
             entry_row[17] = cor_r_temp # Temp at rear surface when front is at max
 
-            entry_row[18], entry_row[19], entry_row[20], entry_row[21], entry_row[22] = tuple(self._extrema[cycle_index, -1, [0, 1, 2, 4, 5]])
+            entry_row[18:] = tuple(self._extrema[cycle_index, -1, [0, 1, 2, 4, 6, 7]])
         except IndexError:
             entry_row[13:] = -1
             return True
